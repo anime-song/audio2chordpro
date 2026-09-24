@@ -8,6 +8,8 @@
   * 歌っていない小節が2小節以上続いたら間奏としてグリッド（[C]---- ----|、- = 8分）で書く
   * 行末の後ろにコードが2つ以上続く／1.5小節以上離れるときもグリッドにし、最後の音節と同じ小節のコードは
     行末をダッシュで閉じて書く（歌詞-[X]- ----|）
+  * 行の途中でも、音節と次の音節の間にコードが2つ以上続く／1.5小節以上離れるときは、間をダッシュと小節線で埋める
+    （歌詞--[X]- [Y]---|---- [Z]---歌詞。丸ごと空く小節はグリッドの行にして改行する）
   * 漢字の読みの途中に来たコードは、語全体をルビにしてその中に書く（言葉(こと[C]ば)）
 """
 
@@ -29,7 +31,7 @@ log = logging.getLogger(__name__)
 class RenderOptions:
     simplify: bool = False  # E#/B#/Cb/Fb を F/C/B/E と綴る
     head_outside: bool = False  # 行頭のコードを括弧の外に書く: [C](はい…  （既定は内側: ([C]はい…）
-    tail_grid: bool = True  # 行末の後ろに積み重なるコードを小節グリッドで書く
+    tail_grid: bool = True  # 行末の後ろ・行の途中の音節の間に積み重なるコードを小節グリッドで書く
     min_gap_bars: int = 2  # 間奏とみなす、歌っていない小節の数
     tol: float = 0.5  # コードをモーラの直前に書ける距離 [拍]
     head_window: float = 2.5  # 行間のコードを次の行頭に書く範囲 [拍]
@@ -195,6 +197,7 @@ def snap_to_notes(
 class Placement:
     before: dict = field(default_factory=dict)  # モーラ番号 -> [コード]
     after: dict = field(default_factory=dict)  # モーラ番号 -> [コード]
+    gap: dict = field(default_factory=dict)  # モーラ番号 -> その後ろに書く「-」と小節線（render_gap）
 
 
 def syllable_heads(morae: list[str]) -> np.ndarray:
@@ -216,24 +219,9 @@ def place_in_line(line: LyricLine, beat: float, label: str, pl: Placement, tol: 
         pl.after.setdefault(int(started[-1]) if len(started) else 0, []).append(label)
 
 
-def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> str:
-    """配置したコードを歌詞の表層に差し込む。
-    * 漢字の読みの途中に来たコードは語全体をルビにする（字の境目なら 学[C]校 のように分けて書く）
-    * 伸ばしの途中のコードは、後ろの記号（！、」など）の後・空白の前に書く"""
-    out: list[str] = []
-    pending: list[str] = []
-    ch = lambda labs: "".join(f"[{x}]" for x in labs)  # noqa: E731
-    before = {k: list(v) for k, v in pl.before.items()}
-    after = pl.after
-    head = before.pop(0, []) if head_outside else []
-
-    def flush():
-        nonlocal pending
-        if pending:
-            out.append(ch(pending))
-            pending = []
-
-    units = []  # (トークン, 同じ語の seg 列, 最初のモーラ番号)
+def _units(line: LyricLine) -> list[tuple[Token, list, int | None]]:
+    """(トークン, 続けて書く seg 列, 最初のモーラ番号)。同じ語の中で続く漢字はまとめる（ルビの単位）"""
+    units = []
     g = 0
     for t in line.tokens:
         if not t.segs:
@@ -248,8 +236,27 @@ def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> s
         for segs in groups:
             units.append((t, segs, g))
             g += sum(len(x.morae) for x in segs)
+    return units
 
-    for t, segs, g0 in units:
+
+def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> str:
+    """配置したコードを歌詞の表層に差し込む。
+    * 漢字の読みの途中に来たコードは語全体をルビにする（字の境目なら 学[C]校 のように分けて書く）
+    * 伸ばしの途中のコードと音節の間の「-」は、後ろの記号（！、」など）の後・空白の前に書く"""
+    out: list[str] = []
+    pending = ""
+    ch = lambda labs: "".join(f"[{x}]" for x in labs)  # noqa: E731
+    before = {k: list(v) for k, v in pl.before.items()}
+    after = pl.after
+    head = before.pop(0, []) if head_outside else []
+
+    def flush():
+        nonlocal pending
+        if pending:
+            out.append(pending)
+            pending = ""
+
+    for t, segs, g0 in _units(line):
         if not segs:  # 記号・空白
             if t.is_space:
                 flush()
@@ -288,7 +295,7 @@ def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> s
                         out.append(ch(after.get(k - 1, [])) + ch(before.get(k, [])))
                     out.append(s.surface)
                     k += len(s.morae)
-            pending += after.get(ids[-1], [])
+            pending += ch(after.get(ids[-1], [])) + pl.gap.get(ids[-1], "")
         else:
             s = segs[0]
             n = len(s.morae)
@@ -300,8 +307,8 @@ def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> s
                     flush()
                     out.append(ch(before[i]))
                 out.append(s.surface[pos[k] : b])
-                if after.get(i):
-                    pending += after[i]
+                if after.get(i) or pl.gap.get(i):
+                    pending += ch(after.get(i, [])) + pl.gap.get(i, "")
                     if k + 1 < n:
                         flush()
     flush()
@@ -333,20 +340,63 @@ def render_grid(tl: Timeline, bar0: int, bar1: int, simplify: bool = False, bars
     return lines
 
 
+def _dashes(tl: Timeline, bar: int, k0: int, k1: int, chords: list[tuple[float, str]]) -> str:
+    """小節 bar の8分 k0..k1-1 を「-」で埋め、コードをその位置（範囲の外なら端）に書く。小節の半分に空白"""
+    b0, slots = tl.bar_start(bar), tl.bar_len(bar) * 2
+    at: dict[int, list[str]] = {}
+    for beat, lab in chords:
+        at.setdefault(min(max(int(round((beat - b0) * 2)), k0), k1 - 1), []).append(lab)
+    s = ""
+    for k in range(k0, k1):
+        if k == slots // 2 and k != k0:
+            s += " "
+        s += "".join(f"[{x}]" for x in at.get(k, [])) + "-"
+    return s
+
+
 def render_tail(tl: Timeline, last_on: float, chords: list[tuple[float, str]]) -> str:
     """最後の音節の後ろから小節の終わりまでを「-」で埋め、コードをその位置に書いて「|」で閉じる"""
     bar = tl.bar_index(last_on)
-    b0, slots = tl.bar_start(bar), tl.bar_len(bar) * 2
-    first = int(round((last_on - b0) * 2)) + 1
-    at: dict[int, list[str]] = {}
-    for beat, lab in chords:
-        at.setdefault(min(max(int(round((beat - b0) * 2)), first), slots - 1), []).append(lab)
-    s = ""
-    for k in range(first, slots):
-        if k == slots // 2 and k != first:
-            s += " "
-        s += "".join(f"[{x}]" for x in at.get(k, [])) + "-"
-    return s + "|"
+    first = int(round((last_on - tl.bar_start(bar)) * 2)) + 1
+    return _dashes(tl, bar, first, tl.bar_len(bar) * 2, chords) + "|"
+
+
+def render_gap(tl: Timeline, a: float, b: float, chords: list[tuple[float, str]], simplify: bool = False) -> str:
+    """行の途中で、拍 a に始まる音節から拍 b に始まる次の音節までを「-」と小節線で埋める。
+    丸ごと空く小節はグリッドの行にして改行し、次の音節の前はその小節の頭から「-」で埋める"""
+    bar_a, bar_b = tl.bar_index(a), tl.bar_index(b)
+    first = int(round((a - tl.bar_start(bar_a)) * 2)) + 1
+    last = int(round((b - tl.bar_start(bar_b)) * 2))
+    if bar_a == bar_b:
+        return _dashes(tl, bar_a, first, last, chords)
+    s = _dashes(tl, bar_a, first, tl.bar_len(bar_a) * 2, [c for c in chords if tl.bar_index(c[0]) <= bar_a]) + "|"
+    in_b = [c for c in chords if tl.bar_index(c[0]) >= bar_b]
+    if bar_b > bar_a + 1:  # 丸ごと空く小節（コードは render_grid が書く）
+        s += "\n" + "\n".join(render_grid(tl, bar_a + 1, bar_b, simplify)) + "\n"
+        b0, ev = tl.bar_start(bar_b), tl.chord_at(tl.bar_start(bar_b))
+        if last and ev is not None and ev.beat < b0 - 1e-6:  # 行頭では前の小節から鳴っているコードを書き直す
+            in_b.insert(0, (b0, tl.chord_label(ev, simplify)))
+    return s + _dashes(tl, bar_b, 0, last, in_b)
+
+
+def line_gaps(tl: Timeline, line: LyricLine, tol: float = 0.5) -> list[tuple[int, float, float]]:
+    """行の途中で、音節と次の音節の間にコードが2つ以上続く／1.5小節以上離れる箇所。
+    (前の音節の最後のモーラ番号, 前の音節の開始 [拍], 次の音節の開始 [拍])。漢字のルビの途中では切らない"""
+    heads = np.where(syllable_heads(line_morae(line.tokens)))[0]
+    inner = set()  # まとめて書く漢字の2モーラ目以降
+    for _, segs, g0 in _units(line):
+        if segs and segs[0].kind == "kanji":
+            inner.update(range(g0 + 1, g0 + sum(len(x.morae) for x in segs)))
+    beats = np.array([e.beat for e in tl.chords])
+    out = []
+    for h, h2 in zip(heads[:-1], heads[1:]):
+        if h2 in inner:
+            continue
+        a, b = float(line.on[h]), float(line.on[h2])
+        mid = beats[(beats > a + tol + 1e-6) & (beats < b - tol - 1e-6)]
+        if len(mid) >= 2 or (len(mid) and mid[-1] - a >= 1.5 * tl.beats_per_bar):
+            out.append((int(h2) - 1, a, b))
+    return out
 
 
 def _runs(mask: np.ndarray, breaks: set[int]) -> list[tuple[int, int]]:
@@ -364,8 +414,8 @@ def _runs(mask: np.ndarray, breaks: set[int]) -> list[tuple[int, int]]:
     return out
 
 
-def _grid_bars(tl: Timeline, lines: list[LyricLine], n_bars: int, opt: RenderOptions) -> list[tuple[int, int]]:
-    """グリッドで書く小節の区間"""
+def _interludes(tl: Timeline, lines: list[LyricLine], n_bars: int, opt: RenderOptions) -> list[tuple[int, int]]:
+    """間奏の小節の区間"""
     bpb = tl.beats_per_bar
     # 歌っている小節（行の範囲ではなくモーラの発声区間で。伸ばしは1小節、行末は2小節まで）
     sung = np.zeros(n_bars, bool)
@@ -381,6 +431,15 @@ def _grid_bars(tl: Timeline, lines: list[LyricLine], n_bars: int, opt: RenderOpt
     for a, b in _runs(~sung, key_bars):  # 間奏：歌っていない小節が min_gap_bars 以上（曲頭・曲末は1小節でも）
         if b - a >= opt.min_gap_bars or a == 0 or b == n_bars:
             runs.append((a, b))
+    return runs
+
+
+def _grid_bars(
+    tl: Timeline, lines: list[LyricLine], n_bars: int, opt: RenderOptions, runs: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """グリッドで書く小節の区間（間奏 runs と、行末の後ろ）"""
+    bpb = tl.beats_per_bar
+    key_bars = {tl.bar_index(b + 1e-6) for b, _ in tl.keys[1:]}
     if not opt.tail_grid:
         return runs
     # 行末の後ろ（最後のモーラの次の小節 〜 次の行が始まる小節の手前）
@@ -408,7 +467,17 @@ def build_chordpro(
     bpb, tol = tl.beats_per_bar, opt.tol
     last_beat = max([e.beat for e in tl.chords] + [L.end for L in lines] + [0.0])
     n_bars = tl.bar_index(last_beat) + 1
-    runs = _grid_bars(tl, lines, n_bars, opt)
+    inter = _interludes(tl, lines, n_bars, opt)
+    gaps = {}
+    if opt.tail_grid:
+        # 間奏をまたぐ箇所は、行の途中ではなく間奏のグリッドとして書く（アライメントが崩れて行が間奏をまたぐことがある）
+        for i, L in enumerate(lines):
+            gaps[i] = [
+                (k, a, b)
+                for k, a, b in line_gaps(tl, L, tol)
+                if not any(max(ra, tl.bar_index(a)) < min(rb, tl.bar_index(b) + 1) for ra, rb in inter)
+            ]
+    runs = _grid_bars(tl, lines, n_bars, opt, inter)
     spans = [(tl.bar_start(a), tl.bar_start(b)) for a, b in runs]
     all_on = np.concatenate([L.on for L in lines]) if lines else np.array([])
 
@@ -428,10 +497,15 @@ def build_chordpro(
     blocks = [("line", L.start, i) for i, L in enumerate(lines)] + [("grid", tl.bar_start(a), (a, b)) for a, b in runs]
     blocks.sort(key=lambda x: x[1])
     places = [Placement() for _ in lines]
+    gap_chords = {(i, k): [] for i, g in gaps.items() for k, _, _ in g}
     for ev in tl.chords:
         if in_grid(ev.beat):
             continue
         lab = tl.chord_label(ev, opt.simplify)
+        hit = [(i, k) for i, g in gaps.items() for k, a, b in g if a + tol + 1e-6 < ev.beat < b - tol - 1e-6]
+        if hit:  # 行の途中の「-」の中に書く
+            gap_chords[hit[0]].append((ev.beat, lab))
+            continue
         prev = [bl for bl in blocks if bl[1] <= ev.beat + (tol if bl[0] == "line" else 0.0)]
         nxt = [bl for bl in blocks if bl[0] == "line" and bl[1] > ev.beat + tol]
         if not prev or prev[-1][0] == "grid":
@@ -446,6 +520,10 @@ def build_chordpro(
             tails[target].append((ev.beat, lab))
         else:
             place_in_line(lines[target], ev.beat, lab, places[target], tol)
+
+    for (i, k), chords in gap_chords.items():
+        (_, a, b) = next(g for g in gaps[i] if g[0] == k)
+        places[i].gap[k] = render_gap(tl, a, b, chords, opt.simplify)
 
     out = list(header or [])
     out.append(f"{{c:BPM={round(tl.bpm)}　{bpb}/4拍子　-:8分音符}}")

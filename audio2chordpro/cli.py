@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = ap.add_argument_group("出力の書式")
     g.add_argument("--simplify", action="store_true", help="E#/B#/Cb/Fb を F/C/B/E と綴る")
     g.add_argument("--head-outside", action="store_true", help="行頭のコードを括弧の外に書く")
-    g.add_argument("--no-tail-grid", action="store_true", help="行末の後ろのコードを小節グリッドにしない")
+    g.add_argument("--no-tail-grid", action="store_true", help="行末の後ろ・行の途中で続くコードを小節グリッドにしない")
     return ap
 
 
