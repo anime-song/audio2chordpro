@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio2chordpro"
+version = "0.1.0"
+description = "音源 + AMT の MIDI（コード・調・拍）+ 歌詞 → ChordPro（歌詞付きコード譜）"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "numpy",
+    "scipy",
+    "mido",
+    "pretty_midi",
+    "librosa",
+    "soundfile",
+    "pyopenjtalk-plus[onnxruntime]",  # 「何」の読み分け
+    "alkana",
+    "torch==2.8.*",
+    "torchaudio==2.8.*",
+    # SheetSage2 のリモートコードは transformers 5 の BartDecoder に対応していない
+    "transformers>=4.45,<5",
+    "mir_eval",
+    "demucs>=4.1",
+]
+
+[project.scripts]
+audio2chordpro = "audio2chordpro.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["audio2chordpro*"]
+
+[tool.setuptools.package-data]
+audio2chordpro = ["data/*.json"]
+
+[tool.uv]
+# PyTorch 2.8 の wheel があるもの（Intel Mac は無い）
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+# Windows / Linux は CUDA 12.6 版の PyTorch を使う
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

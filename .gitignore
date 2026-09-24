@@ -1,0 +1,35 @@
+# 環境・モデル
+.venv*/
+models/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+
+# エディタ・OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 中間結果・出力
+cache/
+*.cho
+*.align.json
+
+# 楽曲データ（著作物をコミットしないように）
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
+*.mid
+*.midi
+samples/
+lyrics/
