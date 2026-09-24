@@ -37,7 +37,7 @@ SheetSage2 ─ 歌メロノート ───────────────�
 - **音源**: MP3 / WAV
 - **AMT MIDI**: 以下のトラックを含む標準 MIDI ファイル
   - `Predicted Tempo Map`: テンポ、拍子、調（key_signature）
-  - `Predicted Chords`: marker イベントに Harte 表記のコード名（例: `A:min7`, `C:maj7/5`）
+  - `Predicted Chords`: marker イベントに Harte 表記のコード名（例: `A:min7`, `C:maj7/5`）。このトラックに無ければ、他のトラック（テンポマップなど）の marker を使う
   - `melody`: 歌メロトラック（`--melody amt` 指定時に使用）
 - **歌詞テキスト**: UTF-8 プレーンテキスト
   - 1行 = ChordPro の1行、空行 = セクション区切り

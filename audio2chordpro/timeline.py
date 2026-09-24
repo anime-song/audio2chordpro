@@ -157,8 +157,8 @@ def _beat_ticks(tsigs, tpb: int, end_tick: int):
         bar = num * tpb * 4 // den
         if bar < tpb:
             continue
-        step = tpb * 4 // den if den <= 4 else tpb  # 8分系の拍子も4分音符を1拍として扱う
-        ticks.extend(range(t0, t1, step))
+        # 拍は常に4分音符（2/2 は4拍、6/8 は3拍の小節）
+        ticks.extend(range(t0, t1, tpb))
         bpbs += [num * 4 // den] * ((t1 - t0) // bar)
     bpb = max(set(bpbs), key=bpbs.count) if bpbs else 4
     return ticks, bpb
@@ -226,7 +226,7 @@ def load_timeline(path: str, beats=None, quantize: float = 0.5, melody_track: st
     quantize: コードの開始位置を丸める単位 [拍]（0.5 = 8分）"""
     mid = mido.MidiFile(path)
     tpb = mid.ticks_per_beat
-    tempos, key_ticks, tsigs, chord_ticks = [], [], [], []
+    tempos, key_ticks, tsigs, chord_ticks, other_markers = [], [], [], [], []
     for tr in mid.tracks:
         for t, msg in _abs_events(tr):
             if msg.type == "set_tempo":
@@ -235,8 +235,10 @@ def load_timeline(path: str, beats=None, quantize: float = 0.5, melody_track: st
                 key_ticks.append((t, msg.key))
             elif msg.type == "time_signature":
                 tsigs.append((t, msg.numerator, msg.denominator))
-            elif msg.type == "marker" and tr.name.lower().startswith("predicted chord"):
-                chord_ticks.append((t, msg.text))
+            elif msg.type == "marker":
+                (chord_ticks if tr.name.lower().startswith("predicted chord") else other_markers).append((t, msg.text))
+    # コードの marker がテンポマップのトラックに書かれている MIDI もある
+    chord_ticks = sorted(chord_ticks or other_markers, key=lambda x: x[0])
     tempos.sort()
     if not tempos or tempos[0][0] != 0:
         tempos.insert(0, (0, 500000))
