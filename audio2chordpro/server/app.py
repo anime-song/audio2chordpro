@@ -147,17 +147,21 @@ class RunIn(BaseModel):
 
 
 # ================================================================== アプリ
-def create_app(root: str | Path = "projects", models_dir: str | Path | None = None) -> FastAPI:
+def create_app(
+    root: str | Path = "projects", models_dir: str | Path | None = None, scratch_dir: str | Path | None = None
+) -> FastAPI:
+    """root: プロジェクトの置き場、models_dir: tsumugi のモデル、scratch_dir: 大きい中間ファイル（Project を参照）"""
     # 絶対パスにしておく（tsumugi の実行中はプロセスのカレントフォルダが変わる）
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     models_dir = Path(models_dir).resolve() if models_dir else None
+    scratch_dir = Path(scratch_dir).resolve() if scratch_dir else None
 
     def open_project(pid: str) -> Project:
         d = root / pid
         if pid in ("", ".", "..") or Path(pid).name != pid or not (d / "project.json").is_file():
             raise HTTPException(404, f"プロジェクトがありません: {pid}")
-        return Project(d, models_dir)
+        return Project(d, models_dir, scratch_dir)
 
     runner = Runner(open_project)
 
@@ -219,14 +223,14 @@ def create_app(root: str | Path = "projects", models_dir: str | Path | None = No
     # ------------------------------------------------------------ プロジェクト
     @app.get("/api/projects", response_model=list[ProjectSummary])
     def list_projects():
-        return [summary(p) for p in projects(root, models_dir)]
+        return [summary(p) for p in projects(root, models_dir, scratch_dir)]
 
     @app.post("/api/projects", response_model=ProjectDetail)
     def create_project(audio: Annotated[UploadFile, File()], analyze: Annotated[bool, Form()] = True):
         """音源からプロジェクトを作る（同じ音源のプロジェクトがあればそれ）。analyze なら解析のジョブも始める"""
         path = save_upload(audio, AUDIO_EXTS)
         try:
-            p = Project.create(root, path, models_dir)
+            p = Project.create(root, path, models_dir, scratch_dir)
         finally:
             shutil.rmtree(path.parent, ignore_errors=True)
         if analyze:
@@ -241,7 +245,7 @@ def create_app(root: str | Path = "projects", models_dir: str | Path | None = No
     def delete_project(pid: str):
         p = open_project(pid)
         idle(pid)
-        shutil.rmtree(p.dir)
+        p.delete()
         runner.forget(pid)
 
     @app.patch("/api/projects/{pid}/info", response_model=ProjectDetail)

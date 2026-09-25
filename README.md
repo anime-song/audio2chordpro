@@ -162,10 +162,13 @@ projects/<曲名>/
   edits/chords.json    手で直したコード
   alignment.auto.json  自動のアライメント（手で直したものは alignment.json）
   output/<曲名>.cho
-  work/                tsumugi・ボーカル分離・CTC・SheetSage2 の出力（消しても作り直せる）
+  work/                SheetSage2 の出力（1〜2 MB）
 ```
 
-tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`Project.create(..., models_dir=...)` で変更可）に置きます。
+プロジェクトには小さいファイルだけを置きます（音源を除いて 1 曲数 MB）。
+大きい中間ファイルのうち、ボーカル分離・CTC（1曲 200 MB ほど）は `~/.cache/audio2chordpro/scratch/<音源のハッシュ>/`（`scratch_dir=...`、`serve --scratch-dir` で変更可）に置き、
+アライメントをやり直すときにだけ使います（消えていればそのとき作り直します）。tsumugi のステム（1曲 250 MB ほど）は MIDI を取り出したら消します。
+tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`models_dir=...`）に置きます。
 
 ### UI（ブラウザの画面）
 

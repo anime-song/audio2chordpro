@@ -26,6 +26,11 @@ def main(argv=None) -> None:
     ap.add_argument(
         "--models-dir", type=Path, help="tsumugi のソース・チェックポイントの置き場（既定 ~/.cache/audio2chordpro）"
     )
+    ap.add_argument(
+        "--scratch-dir",
+        type=Path,
+        help="大きい中間ファイル（ボーカル分離・CTC）の置き場。消しても作り直せる（既定 ~/.cache/audio2chordpro/scratch）",
+    )
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--no-browser", action="store_true", help="ブラウザを開かない")
@@ -39,7 +44,7 @@ def main(argv=None) -> None:
 
     if not args.no_web_download:
         ensure_web()
-    app = create_app(args.root, args.models_dir)
+    app = create_app(args.root, args.models_dir, args.scratch_dir)
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, [f"http://{args.host}:{args.port}/"]).start()
     uvicorn.run(app, host=args.host, port=args.port)

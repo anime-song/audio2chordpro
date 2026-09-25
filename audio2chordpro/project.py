@@ -19,7 +19,11 @@ projects/<曲名>/
   alignment.auto.json  自動のアライメント
   alignment.json       手で直したアライメント。いまの歌詞から作ったものならこちらを使う
   output/<曲名>.cho
-  work/                tsumugi・ボーカル分離・CTC・SheetSage2 の出力（= Options.cache_dir。消しても作り直せる）
+  work/                SheetSage2 の出力（= Options.cache_dir。1〜2 MB）
+
+大きい中間ファイル（ボーカル分離・CTC、合わせて1曲 200 MB ほど）はプロジェクトに置かず、
+scratch_dir/<音源のハッシュ>/（既定 ~/.cache/audio2chordpro/scratch。= Options.scratch_dir）に置く。
+アライメントをやり直すときにだけ使い、消えていればそのとき作り直す。tsumugi のステムは MIDI を取り出したら消す。
 
 段階の状態: "done"（済み）/ "stale"（入力が変わった）/ "pending"（まだ）/ "skipped"（要らない）
 """
@@ -39,7 +43,16 @@ from pathlib import Path
 
 from .align import Alignment
 from .melody import has_sheetsage, run_sheetsage, sheetsage_dir
-from .pipeline import Options, align_audio, ctc_path, make_midi, prepare, render_chordpro, vocal_features
+from .pipeline import (
+    Options,
+    align_audio,
+    ctc_path,
+    make_midi,
+    prepare,
+    render_chordpro,
+    scratch_dir,
+    vocal_features,
+)
 from .render import RenderOptions
 from .song_info import SongInfo, from_audio
 from .timeline import midi_chords, write_chords_midi
@@ -47,23 +60,26 @@ from .timeline import midi_chords, write_chords_midi
 log = logging.getLogger(__name__)
 
 DEFAULT_MODELS_DIR = Path.home() / ".cache" / "audio2chordpro"  # tsumugi のソース・チェックポイント（全曲で共有）
+DEFAULT_SCRATCH_DIR = DEFAULT_MODELS_DIR / "scratch"  # 大きい中間ファイル（消しても作り直せる）
 STAGES = ("midi", "melody", "vocals", "align", "render")
 ANALYSIS = ("midi", "melody", "vocals")  # 音源だけで走る重い段階
 DEPS = {"align": ("midi", "melody", "vocals"), "render": ("midi", "melody", "align")}
-_PER_PROJECT = ("cache_dir", "models_dir", "render")  # Options のうち project.json に書かないもの
+_PER_PROJECT = ("cache_dir", "scratch_dir", "models_dir", "render")  # Options のうち project.json に書かないもの
 
 
 class Project:
     """project.json・song.json は使うたびに読み、書くときは読み直してから変える。
     段階を実行している間（別のスレッド）に UI から設定・曲情報を変えても、どちらの書き込みも消えない"""
 
-    def __init__(self, path: str | Path, models_dir: str | Path | None = None):
+    def __init__(self, path: str | Path, models_dir: str | Path | None = None, scratch_dir: str | Path | None = None):
         # 絶対パスにしておく。tsumugi は実行中にプロセスのカレントフォルダを移す（os.chdir）ので、
         # 相対パスのままだと、その間に別のスレッド（UI）から開いたときに見つからない
         self.dir = Path(path).resolve()
         self.models_dir = Path(models_dir).resolve() if models_dir else DEFAULT_MODELS_DIR
+        self.scratch_root = Path(scratch_dir).resolve() if scratch_dir else DEFAULT_SCRATCH_DIR
         if not (self.dir / "project.json").exists():
             raise FileNotFoundError(f"プロジェクトではありません: {self.dir}")
+        self._move_old_work()
 
     @property
     def data(self) -> dict:
@@ -80,11 +96,17 @@ class Project:
 
     # ------------------------------------------------------------ 作る・開く
     @classmethod
-    def create(cls, root: str | Path, audio: str | Path, models_dir: str | Path | None = None) -> Project:
+    def create(
+        cls,
+        root: str | Path,
+        audio: str | Path,
+        models_dir: str | Path | None = None,
+        scratch_dir: str | Path | None = None,
+    ) -> Project:
         """音源からプロジェクトを作る。同じ音源のプロジェクトが root にあればそれを開く"""
         audio, root = Path(audio).resolve(), Path(root).resolve()
         sha = _file_sha1(audio)
-        for p in projects(root, models_dir):
+        for p in projects(root, models_dir, scratch_dir):
             if p.data.get("audio_sha1") == sha:
                 return p
         meta = from_audio(audio)
@@ -106,14 +128,33 @@ class Project:
         _write_json(
             d / "song.json", {"info": asdict(meta.info), "sources": meta.sources, "alternatives": meta.alternatives}
         )
-        p = cls(d, models_dir)
+        p = cls(d, models_dir, scratch_dir)
         if meta.lyrics:
             p.set_lyrics(meta.lyrics, {"type": "tag"})
         return p
 
     @classmethod
-    def open(cls, path: str | Path, models_dir: str | Path | None = None) -> Project:
-        return cls(path, models_dir)
+    def open(
+        cls, path: str | Path, models_dir: str | Path | None = None, scratch_dir: str | Path | None = None
+    ) -> Project:
+        return cls(path, models_dir, scratch_dir)
+
+    def delete(self) -> None:
+        """プロジェクトと、その大きい中間ファイルを消す"""
+        shutil.rmtree(self.scratch, ignore_errors=True)
+        shutil.rmtree(self.dir)
+
+    def _move_old_work(self) -> None:
+        """前の版は大きい中間ファイルも work/ に置いていた。ボーカル分離・CTC は scratch に移し、tsumugi の出力は消す"""
+        work = self.work
+        if not any((work / sub).is_dir() for sub in ("sep", "ctc", "tsumugi")):
+            return
+        with _lock(self.dir):
+            for sub in ("sep", "ctc"):
+                if (work / sub).is_dir():
+                    shutil.copytree(work / sub, self.scratch / sub, dirs_exist_ok=True)
+                    shutil.rmtree(work / sub)
+            shutil.rmtree(work / "tsumugi", ignore_errors=True)
 
     # ------------------------------------------------------------ ファイル
     @property
@@ -123,6 +164,11 @@ class Project:
     @property
     def work(self) -> Path:
         return self.dir / "work"
+
+    @property
+    def scratch(self) -> Path:
+        """この曲の大きい中間ファイルの置き場（音源のハッシュで分ける）"""
+        return self.scratch_root / self.data["audio_sha1"][:16]
 
     @property
     def midi_path(self) -> Path:
@@ -155,7 +201,7 @@ class Project:
         d = self.data.get("options", {})
         render = RenderOptions(**_known(RenderOptions, d.get("render", {})))
         kw = {k: v for k, v in _known(Options, d).items() if k not in _PER_PROJECT}
-        return Options(**kw, render=render, cache_dir=self.work, models_dir=self.models_dir)
+        return Options(**kw, render=render, cache_dir=self.work, scratch_dir=self.scratch, models_dir=self.models_dir)
 
     def set_options(self, **changes) -> None:
         """Options・RenderOptions の項目を名前で変える（例: set_options(melody="amt", simplify=True)）"""
@@ -374,11 +420,13 @@ class Project:
     # ---- 段階の中身（redo: 前の結果を消してから作り直す）。返す dict は project.json の記録に足す
     def _run_midi(self, redo: bool) -> dict:
         opt = self.options
+        out = scratch_dir(opt) / "tsumugi" / "out" / self.audio.stem  # ステム（1曲 250 MB ほど）・楽器ごとの MIDI
         if redo:
-            shutil.rmtree(Path(opt.cache_dir) / "tsumugi" / "out" / self.audio.stem, ignore_errors=True)
+            shutil.rmtree(out, ignore_errors=True)
         midi = make_midi(self.audio, opt)
         self.midi_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(midi, self.midi_path)
+        shutil.rmtree(out, ignore_errors=True)  # 使うのはコード・拍の MIDI だけ
         return {"source": "tsumugi"}
 
     def _run_melody(self, redo: bool) -> None:
@@ -390,7 +438,7 @@ class Project:
     def _run_vocals(self, redo: bool) -> None:
         opt = self.options
         if redo:
-            shutil.rmtree(Path(opt.cache_dir) / "sep" / "htdemucs" / self.audio.stem, ignore_errors=True)
+            shutil.rmtree(scratch_dir(opt) / "sep" / "htdemucs" / self.audio.stem, ignore_errors=True)
             ctc_path(self.audio, opt).unlink(missing_ok=True)
         vocal_features(self.audio, opt)
 
@@ -453,18 +501,21 @@ class Project:
             return self.midi_path.exists()
         if stage == "melody":
             return has_sheetsage(self.audio, opt.cache_dir)
-        if stage == "vocals":
-            return ctc_path(self.audio, opt).exists()
+        if stage == "vocals":  # scratch の一時ファイルなので記録だけで見る（消えていればアライメントのときに作り直す）
+            return True
         if stage == "align":
             return self.auto_alignment_path.exists()
         path = self.output_path
         return bool(path and path.exists())
 
 
-def projects(root: str | Path, models_dir: str | Path | None = None) -> list[Project]:
+def projects(
+    root: str | Path, models_dir: str | Path | None = None, scratch_dir: str | Path | None = None
+) -> list[Project]:
     """root にあるプロジェクト（新しい順）"""
     root = Path(root).resolve()
-    found = [Project(d, models_dir) for d in root.iterdir() if (d / "project.json").exists()] if root.is_dir() else []
+    dirs = [d for d in root.iterdir() if (d / "project.json").exists()] if root.is_dir() else []
+    found = [Project(d, models_dir, scratch_dir) for d in dirs]
     return sorted(found, key=lambda p: p.data.get("created", ""), reverse=True)
 
 

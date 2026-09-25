@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 @dataclass
 class Options:
     cache_dir: str | Path = "cache"  # tsumugi・ボーカル分離・CTC・SheetSage2 の結果を置く場所
+    # 大きい中間ファイル（tsumugi のステム・ボーカル分離・CTC）だけ別の場所に置く（None = cache_dir）。消しても作り直せる
+    scratch_dir: str | Path | None = None
     models_dir: str | Path | None = None  # tsumugi のソース・チェックポイントの置き場（None = cache_dir）
     melody: str = "sheetsage"  # 歌メロの取得元 "sheetsage" | "amt"（MIDI の melody トラック）
     beats: str = "amt"  # 拍の取得元 "amt"（MIDI のテンポマップ）| "sheetsage"
@@ -39,11 +41,11 @@ class Result:
 
 
 def make_midi(audio: str | Path, options: Options | None = None) -> Path:
-    """tsumugi で音源から AMT の MIDI を作る（cache_dir にキャッシュ）"""
+    """tsumugi で音源から AMT の MIDI を作る（scratch_dir にキャッシュ）"""
     from .providers.midi import TsumugiMidiProvider
 
     opt = options or Options()
-    return TsumugiMidiProvider(opt.cache_dir, models_dir=opt.models_dir)(audio)
+    return TsumugiMidiProvider(scratch_dir(opt), models_dir=opt.models_dir)(audio)
 
 
 def prepare(
@@ -89,14 +91,20 @@ def transcribe(
     return Result(render_chordpro(tl, alignment, notes, info, opt), alignment, tl, midi)
 
 
+def scratch_dir(options: Options | None = None) -> Path:
+    """大きい中間ファイルの置き場"""
+    opt = options or Options()
+    return Path(opt.scratch_dir if opt.scratch_dir is not None else opt.cache_dir)
+
+
 def ctc_path(audio: str | Path, options: Options | None = None) -> Path:
-    return Path((options or Options()).cache_dir) / "ctc" / f"{Path(audio).stem}.npy"
+    return scratch_dir(options) / "ctc" / f"{Path(audio).stem}.npy"
 
 
 def vocal_features(audio: str | Path, options: Options | None = None) -> tuple[Path, np.ndarray]:
-    """ボーカル分離（WAV のパス）と CTC の事後確率（cache_dir にキャッシュ）"""
+    """ボーカル分離（WAV のパス）と CTC の事後確率（scratch_dir にキャッシュ）"""
     opt = options or Options()
-    vocals = separate_vocals(audio, opt.cache_dir)
+    vocals = separate_vocals(audio, scratch_dir(opt))
     return vocals, ctc_emissions(vocals, cache=ctc_path(audio, opt))
 
 

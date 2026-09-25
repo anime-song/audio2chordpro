@@ -1,6 +1,7 @@
 """プロジェクトの段階と、入力が変わったときのやり直し（重い処理はまねるだけ。MIDI・音源はその場で作る）"""
 
 import json
+import shutil
 
 import pytest
 from conftest import ALIGNMENT
@@ -120,3 +121,36 @@ def test_changes_during_a_run_are_kept(tmp_path, song, calls):
         "align": "pending",
         "render": "pending",
     }
+
+
+def test_large_files_stay_out_of_the_project(tmp_path, song, calls):
+    """tsumugi のステムは消し、ボーカル分離・CTC は scratch に置く（プロジェクトには残さない）"""
+    p = Project.create(tmp_path / "projects", song[0], scratch_dir=tmp_path / "scratch")
+    p.set_options(melody="amt")
+    p.run("analysis")
+    assert p.midi_path.exists()
+    assert p.scratch.parent == tmp_path / "scratch"
+    assert not (p.scratch / "tsumugi" / "out" / p.audio.stem).exists()  # ステムは消えている
+    assert p.options.scratch_dir == p.scratch and (p.scratch / "ctc").is_dir()
+    assert not any(p.dir.rglob("*.npy"))
+
+    # scratch が消えても、ボーカル分離は済みのまま（アライメントのときに作り直す）
+    shutil.rmtree(p.scratch)
+    assert p.status()["vocals"] == "done"
+
+    # 消すと scratch も消える
+    scratch = p.scratch
+    (scratch / "ctc").mkdir(parents=True)
+    p.delete()
+    assert not p.dir.exists() and not scratch.exists()
+
+
+def test_old_work_folder_is_moved(tmp_path, song):
+    """前の版の work/ にあった大きいファイル：ボーカル分離・CTC は scratch へ、tsumugi の出力は消す"""
+    p = Project.create(tmp_path / "projects", song[0], scratch_dir=tmp_path / "scratch")
+    for f in ("sep/htdemucs/x/vocals.wav", "ctc/x.npy", "tsumugi/out/x/stems/a.wav", "sheetsage/x/melody_vocal.mid"):
+        (p.work / f).parent.mkdir(parents=True, exist_ok=True)
+        (p.work / f).write_bytes(b"x")
+    q = Project.open(p.dir, scratch_dir=tmp_path / "scratch")
+    assert sorted(x.name for x in q.work.iterdir()) == ["sheetsage"]
+    assert (q.scratch / "sep/htdemucs/x/vocals.wav").exists() and (q.scratch / "ctc/x.npy").exists()

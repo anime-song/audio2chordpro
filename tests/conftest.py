@@ -21,6 +21,13 @@ ALIGNMENT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def local_dirs(tmp_path, monkeypatch):
+    """既定のモデル・中間ファイルの置き場（~/.cache/audio2chordpro）をテストの一時フォルダにする"""
+    monkeypatch.setattr(project_mod, "DEFAULT_MODELS_DIR", tmp_path / "home-cache")
+    monkeypatch.setattr(project_mod, "DEFAULT_SCRATCH_DIR", tmp_path / "home-cache" / "scratch")
+
+
 @pytest.fixture
 def song(tmp_path):
     """(音源, AMT の MIDI)。音源は無音、ファイル名から曲名「朝のうた」・歌手「歌手A」"""
@@ -36,11 +43,15 @@ def calls(monkeypatch, song):
     calls["midi_hook"] は tsumugi の途中で呼ぶ"""
     n = {"midi": 0, "melody": 0, "vocals": 0, "align": 0, "hook": None, "midi_hook": None}
 
-    def make_midi(audio, opt):
+    def make_midi(audio, opt):  # tsumugi と同じ所にステムと MIDI を置く
         n["midi"] += 1
         if n["midi_hook"]:
             n["midi_hook"]()
-        return song[1]
+        out = project_mod.scratch_dir(opt) / "tsumugi" / "out" / audio.stem
+        (out / "stems").mkdir(parents=True, exist_ok=True)
+        (out / "stems" / "vocals.wav").write_bytes(b"x" * 100)
+        (out / "merged").mkdir(exist_ok=True)
+        return shutil.copy(song[1], out / "merged" / f"{audio.stem}_beat_chord.mid")
 
     def run_sheetsage(audio, cache_dir, model):  # 歌メロ（ノートの無い MIDI）を置く
         n["melody"] += 1
