@@ -51,6 +51,12 @@ def _norm(s: str) -> str:
     return unicodedata.normalize("NFKC", s).casefold().replace(" ", "")
 
 
+def same_title(hit_title: str, title: str) -> bool:
+    """検索結果の曲名が title と同じか。検索結果に付くサブタイトル「曲名(サブタイトル)」は無視する"""
+    h, t = _norm(hit_title), _norm(title)
+    return h == t or h.startswith(t + "(")
+
+
 class SiteLyricsProvider:
     """LyricsProvider の実装：曲名が一致し（歌手名を指定すればそれも含む）、最初に見つかった曲を使う"""
 
@@ -59,10 +65,10 @@ class SiteLyricsProvider:
 
     def __call__(self, title: str, artist: str = "") -> tuple[SongInfo, str] | None:
         for hit in search(title, artist, self.sites):
-            if _norm(hit.title) == _norm(title) and (not artist or _norm(artist) in _norm(hit.artist)):
+            if same_title(hit.title, title) and (not artist or _norm(artist) in _norm(hit.artist)):
                 page = fetch(hit)
                 return page.info, page.lyrics
         return None
 
 
-__all__ = ["SITES", "LyricsPage", "LyricsSite", "SiteBlocked", "SiteLyricsProvider", "SongHit", "fetch", "search"]
+__all__ = ["SITES", "LyricsPage", "LyricsSite", "SiteBlocked", "SiteLyricsProvider", "SongHit", "fetch", "same_title", "search"]

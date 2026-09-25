@@ -1,0 +1,3 @@
+# Windows の autocrlf で .gitignore が CRLF になると、空行（CR だけの行）が「フォルダ/」の形のパスにマッチして
+# git check-ignore がすべてのフォルダを無視扱いにする（providers/lyrics/ なども）。LF のまま置く
+.gitignore text eol=lf

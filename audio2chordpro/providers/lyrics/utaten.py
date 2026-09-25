@@ -1,7 +1,8 @@
 """うたてん（https://utaten.com/）
 
   検索     : /search/=/title=<曲名>/artist_name=<歌手名>/…/page=<n>/（曲名は部分一致、1ページ40件、人気順）
-  歌詞ページ: /lyric/<id>/。歌詞はふりがな付き（<span class="ruby"><span class="rb">漢字</span><span class="rt">かな</span></span>）
+  歌詞ページ: /lyric/<id>/。曲名の後ろにサブタイトル（「…」挿入歌 など）が付くことがある（検索結果では「曲名(サブタイトル)」）。
+             歌詞はふりがな付き（<span class="ruby"><span class="rb">漢字</span><span class="rt">かな</span></span>）
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ class UtaTen(LyricsSite):
                 continue
             hit = SongHit(
                 site=self.name,
-                title=_text(a),
+                title=_text(a),  # サブタイトルがあれば「曲名(サブタイトル)」
                 artist=_text(tr.select_one(".searchResult__artist > p")),
                 url=urljoin(BASE, a["href"]),
                 beginning=_text(tr.select_one(".lyricList__beginning")),
@@ -100,8 +101,10 @@ class UtaTen(LyricsSite):
     def parse_song(self, html: str, url: str) -> LyricsPage:
         soup = _soup(html)
         head = soup.select_one(".newLyricTitle__main")
-        if head is not None:
-            for s in head.select(".newLyricTitle_afterTxt"):
+        subtitle = ""
+        if head is not None:  # 曲名の後ろの「歌詞」と、サブタイトル（タイアップなど）を外す
+            subtitle = _text(head.select_one(".newLyricTitle__subTitle"))
+            for s in head.select(".newLyricTitle_afterTxt, .newLyricTitle__subTitle"):
                 s.decompose()
         info = SongInfo(title=_text(head), artist=_text(soup.select_one(".newLyricWork__name")))
         for dt in soup.select("dt.newLyricWork__title"):
@@ -113,7 +116,7 @@ class UtaTen(LyricsSite):
         if body is None:
             raise ValueError(f"歌詞が見つかりません: {url}")
         lyrics, ruby = _lyrics(body)
-        extra = {}
+        extra = {"subtitle": subtitle} if subtitle else {}
         kana = _text(soup.select_one(".newLyricTitle__kana"))
         if kana:
             extra["title_kana"] = kana.split("：", 1)[-1]

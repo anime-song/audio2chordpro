@@ -1,6 +1,6 @@
 """うたてんのパーサ（ネットにはつながない。HTML はサイトの構造をまねた架空のもの）"""
 
-from audio2chordpro.providers.lyrics import fetch
+from audio2chordpro.providers.lyrics import fetch, same_title
 from audio2chordpro.providers.lyrics.utaten import UtaTen
 
 SEARCH_HTML = """
@@ -22,7 +22,10 @@ SEARCH_HTML = """
 """
 
 SONG_HTML = """
-<h2 class="newLyricTitle__main">朝のうた <span class="newLyricTitle_afterTxt">歌詞</span></h2>
+<h2 class="newLyricTitle__main">
+  朝のうた <span class="newLyricTitle_afterTxt">歌詞</span>
+  <span class="newLyricTitle__subTitle">「朝の番組」テーマソング</span>
+</h2>
 <div class="newLyricTitle__kana">よみ：あさのうた</div>
 <dl class="newLyricWork">
   <dt class="newLyricWork__name"><h3><a href="/artist/lyric/1">歌手A</a></h3></dt>
@@ -53,7 +56,7 @@ def test_parse_song():
     assert (page.info.lyricist, page.info.composer, page.info.arranger) == ("作家B", "作家C・作家D", "作家D")
     assert page.lyrics == "あさの光に\n言葉をのせて\n\nHello world\n"
     assert page.lyrics_ruby == "あさの光(ひかり)に\n言葉(ことば)をのせて\n\nHello world\n"
-    assert page.extra == {"title_kana": "あさのうた", "release": "2020.01.01"}
+    assert page.extra == {"subtitle": "「朝の番組」テーマソング", "title_kana": "あさのうた", "release": "2020.01.01"}
 
 
 def test_fetch_rejects_unknown_site():
@@ -62,3 +65,10 @@ def test_fetch_rejects_unknown_site():
     except ValueError:
         return
     raise AssertionError("未対応のサイトは ValueError")
+
+
+def test_same_title():
+    assert same_title("朝のうた", "朝のうた")
+    assert same_title("朝のうた(「朝の番組」テーマソング)", "朝のうた")
+    assert same_title("ＡＳＡ　ｎｏ ＵＴＡ", "asa no uta")
+    assert not same_title("朝のうたごえ", "朝のうた")
