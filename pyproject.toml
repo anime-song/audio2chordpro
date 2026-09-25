@@ -47,7 +47,7 @@ audio2chordpro = "audio2chordpro.cli:main"
 include = ["audio2chordpro*"]
 
 [tool.setuptools.package-data]
-audio2chordpro = ["data/*.json"]
+audio2chordpro = ["data/*.json", "server/static/**/*"]  # server/static: web/ のビルド（npm run build）
 
 [tool.uv]
 # PyTorch 2.8 の wheel があるもの（Intel Mac は無い）

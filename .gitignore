@@ -34,3 +34,6 @@ projects/
 *.midi
 /samples/
 /lyrics/
+
+# web/ のビルド（npm run build）
+audio2chordpro/server/static/

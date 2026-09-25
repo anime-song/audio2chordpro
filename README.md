@@ -166,15 +166,21 @@ projects/<曲名>/
 
 tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`Project.create(..., models_dir=...)` で変更可）に置きます。
 
-### UI のサーバ（作成中）
+### UI（ブラウザの画面）
 
 ```bash
-uv run audio2chordpro serve            # http://127.0.0.1:8000（プロジェクトは ./projects。--root で変更）
+cd web && npm install && npm run build && cd ..   # 画面をビルドする（Node.js が必要。初回と web/ を変えたとき）
+uv run audio2chordpro serve                       # http://127.0.0.1:8000 が開く（プロジェクトは ./projects。--root で変更）
 ```
 
-画面はまだありません（`/` は API の説明 `/docs` に移ります）。API は FastAPI で、中身は上のプロジェクトです。
-音源をアップロードすると解析（tsumugi・SheetSage2・ボーカル分離）がすぐ裏で始まり、その間に曲情報・歌詞を決められます。
-重い段階は1本の列（ジョブ）で順に実行し、`GET /api/jobs/{id}` で実行中の段階・終わった段階・ログが分かります。
+手順は ① 音源を入れる → ② 曲情報・歌詞 → ③ 作成 → ④ コード譜（プレビュー・書式・ダウンロード）です。
+音源を入れると解析（tsumugi・SheetSage2・ボーカル分離）がすぐ裏で始まり、その間に曲情報を確かめ、歌詞を歌詞サイトから選ぶか貼り付けられます。
+重い段階は1本の列（ジョブ）で順に実行し、画面に実行中の段階とログが出ます。
+
+画面を作り変えるときは、`uv run audio2chordpro serve --no-browser` を動かしたまま `cd web && npm run dev`（http://localhost:5173、`/api` はサーバへ中継）。
+API を変えたら `npm run gen:api` で画面側の型（`web/src/api/schema.ts`）を作り直します。
+
+画面は FastAPI の API（`audio2chordpro/server/app.py`、説明は `/docs`）を使っています。中身は上のプロジェクトです。
 
 | API | 内容 |
 |---|---|
@@ -243,6 +249,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/pipeline.py` | 統合パイプライン制御（`transcribe`, `prepare`, `align_audio`, `render_chordpro`） |
 | `audio2chordpro/project.py` | 1曲1フォルダのプロジェクト：段階ごとの保存・やり直し・手直し |
 | `audio2chordpro/server/` | UI のサーバ：API（`app.py`）、段階を1本の列で順に実行するジョブ（`jobs.py`） |
+| `web/` | UI の画面（React + TypeScript + Vite）。`src/api/` が API の型と呼び出し、`src/steps/` が手順ごとの画面 |
 | `audio2chordpro/timeline.py` | MIDI テンポマップの拍単位正規化・補正 |
 | `audio2chordpro/chords.py` | コードネームおよび調の解析・調号に応じた表記統一 |
 | `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表層文字列との対応付け |
@@ -254,7 +261,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
 | `audio2chordpro/providers/midi/` | 音源からの MIDI 生成（`tsumugi.py`） |
 | `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
-| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクト・API のテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない） |
+| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクト・API のテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない）。画面のテストは `cd web && npm test` |
 
 ## クレジット・ライセンス
 

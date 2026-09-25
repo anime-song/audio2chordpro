@@ -124,3 +124,21 @@ def test_upload_midi(client, song, calls):
     job = client.post(f"/api/projects/{pid}/run", json={"stages": ["render"]}).json()
     assert _wait(client, job["id"])["state"] == "done"
     assert calls["midi"] == 0  # tsumugi は走らない
+
+
+def test_web(tmp_path, monkeypatch, calls):
+    """web/ のビルドを配る。画面の中の行き先（/p/<id>）には index.html を返す"""
+    from audio2chordpro.server import app as app_mod
+
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<div id=root></div>", encoding="utf-8")
+    (static / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(app_mod, "STATIC_DIR", static)
+    with TestClient(create_app(tmp_path / "projects")) as c:
+        assert c.get("/").text == "<div id=root></div>"
+        assert c.get("/p/朝のうた?step=result").text == "<div id=root></div>"
+        assert c.get("/assets/app.js").text == "console.log(1)"
+        assert "secret" not in c.get("/assets/..%2F..%2Fsecret.txt").text
+        assert c.get("/api/nothing").status_code == 404

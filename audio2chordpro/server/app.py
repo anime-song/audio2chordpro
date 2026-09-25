@@ -6,7 +6,7 @@
   実行         : POST /api/projects/{id}/run → ジョブ。GET /api/jobs/{id} で進み具合
   ファイル     : GET …/chordpro、…/audio（Range 対応）、…/midi、PUT …/midi（手元の MIDI を使う）
 
-{id} はプロジェクトのフォルダ名。web/ のビルド（server/static/）があれば / で配る。
+{id} はプロジェクトのフォルダ名。web/ のビルド（server/static/）があれば / で配る（npm run build）。
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..project import Project, projects
@@ -118,6 +117,7 @@ class ProjectDetail(ProjectSummary):
     options: OptionsModel
     midi_source: str | None  # "tsumugi" | "upload"
     output: str | None  # ChordPro のファイル名
+    output_version: str | None  # ChordPro を書き直すたびに変わる（画面が読み直す目印）
     edits: EditsModel
     jobs: list[JobModel]  # このプロジェクトのジョブ（新しい順）
 
@@ -191,6 +191,7 @@ def create_app(root: str | Path = "projects", models_dir: str | Path | None = No
             options=OptionsModel(**{**options, "sheetsage_model": str(opt.sheetsage_model)}),
             midi_source=data["stages"].get("midi", {}).get("source"),
             output=output.name if output and output.exists() else None,
+            output_version=data["stages"].get("render", {}).get("inputs") if output and output.exists() else None,
             edits=EditsModel(
                 chords=p.chords_path.exists(),
                 alignment=p.edited_alignment_path.exists(),
@@ -346,13 +347,17 @@ def create_app(root: str | Path = "projects", models_dir: str | Path | None = No
         return detail(p)
 
     # ------------------------------------------------------------ 画面
-    if (STATIC_DIR / "index.html").exists():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="web")
-    else:  # web/ をまだビルドしていなければ API の説明へ
-
-        @app.get("/", include_in_schema=False)
-        def index():
+    @app.get("/{path:path}", include_in_schema=False)
+    def web(path: str):
+        """web/ のビルドを配る。ファイルでないパス（/p/<id> など、画面の中の行き先）には index.html を返す"""
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404)
+        if not (STATIC_DIR / "index.html").exists():  # web/ をまだビルドしていなければ API の説明へ
             return RedirectResponse("/docs")
+        file = (STATIC_DIR / path).resolve()
+        if path and file.is_file() and file.is_relative_to(STATIC_DIR.resolve()):
+            return FileResponse(file)
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
 
