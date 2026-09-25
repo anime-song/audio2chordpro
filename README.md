@@ -27,7 +27,7 @@ SheetSage2 ─ 歌メロノート ───────────────�
         モーラと歌メロのDP対応付け → 8分音符グリッド整音 → コード配置 → ChordPro 出力
 ```
 
-1. **拍タイムライン (`timeline.py`)**: AMT テンポマップを拍単位に正規化。倍テンポ・半テンポ、冒頭の異常テンポ、位相ズレ（1拍未満の小節）を補正。調に応じた異名同音（例: G長調の ♭VII7 は F7）の綴りを適用。
+1. **拍タイムライン (`timeline.py`)**: AMT テンポマップを拍単位に正規化。倍テンポ・半テンポ、冒頭の異常テンポ、位相ズレ（1拍未満の小節）を補正。コード名の綴り（F#7/A# か Gb7/Bb か）は MIDI に書いてあるとおりにする（tsumugi が前後の文脈から決めている）。
 2. **読み解析 (`lyrics.py`)**: pyopenjtalk による形態素・読み解析。英単語辞書参照、数字の読み分け（数値読み／1文字読み）、漢字連続の単字分割（コード挿入用）に対応。
 3. **強制アライメント (`align.py`)**: wav2vec2 CTC モデル（漢字かな・サブワード混在）に対応したラティス探索。歌メロの発音開始時刻にボーナスを付与して精度を向上。
 4. **コード配置 (`render.py`)**: モーラと歌メロノートを DP（動的計画法）でアライメントし、8分音符グリッドに量子化。各コード変化点に最も近い音節の先頭（±8分音符以内）にコードを配置。
@@ -101,6 +101,7 @@ uv run audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho --save-midi song.
 | `--melody` | `sheetsage` | 歌メロ取得元: `sheetsage` / `amt`（MIDI の melody トラック） |
 | `--beats` | `amt` | 拍取得元: `amt`（MIDI テンポマップ）/ `sheetsage`（変拍子対応） |
 | `--simplify` | `false` | 異名同音の簡略表記（E#, B#, Cb, Fb → F, C, B, E） |
+| `--degree` | `false` | コードをディグリー（例: VIm7、IV/V）で書く。[chord-romanizer](https://github.com/anime-song/chord-romanizer) で前後の流れから決め、主音は MIDI の調（転調も） |
 | `--head-outside` | `false` | 行頭コードを括弧の外側に配置（デフォルトは `（[C]はい）`） |
 | `--no-tail-grid` | `false` | 行末以降・行中のコード小節グリッド展開を無効化 |
 | `--save-midi` | – | tsumugi で作った MIDI をコピーする先 |
@@ -259,7 +260,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/server/` | UI のサーバ：API（`app.py`）、段階を1本の列で順に実行するジョブ（`jobs.py`） |
 | `web/` | UI の画面（React + TypeScript + Vite）。`src/api/` が API の型と呼び出し、`src/steps/` が手順ごとの画面 |
 | `audio2chordpro/timeline.py` | MIDI テンポマップの拍単位正規化・補正 |
-| `audio2chordpro/chords.py` | コードネームおよび調の解析・調号に応じた表記統一 |
+| `audio2chordpro/chords.py` | コードネームおよび調の解析（綴りは MIDI のまま） |
 | `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表層文字列との対応付け |
 | `audio2chordpro/vocals.py` | 音源からのボーカル分離、CTC 音響特徴量算出 |
 | `audio2chordpro/align.py` | 歌メロ事前分布に基づくラティス強制アライメント |

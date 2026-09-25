@@ -379,6 +379,11 @@ export interface components {
             snap_to_notes: boolean;
             /** Simplify */
             simplify: boolean;
+            /**
+             * Notation
+             * @enum {string}
+             */
+            notation: "name" | "degree";
             /** Head Outside */
             head_outside: boolean;
             /** Tail Grid */
@@ -404,6 +409,8 @@ export interface components {
             snap_to_notes?: boolean | null;
             /** Simplify */
             simplify?: boolean | null;
+            /** Notation */
+            notation?: ("name" | "degree") | null;
             /** Head Outside */
             head_outside?: boolean | null;
             /** Tail Grid */

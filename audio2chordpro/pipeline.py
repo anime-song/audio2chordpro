@@ -12,7 +12,7 @@ from .align import Alignment, align_lyrics
 from .melody import SHEETSAGE_MODEL, melody_notes, run_sheetsage, sheetsage_beats
 from .render import RenderOptions, build_chordpro, to_beats
 from .song_info import SongInfo
-from .timeline import Timeline, load_timeline
+from .timeline import Timeline, load_timeline, with_degrees
 from .vocals import ctc_emissions, load_vocab, separate_vocals, vocal_rms_db
 
 log = logging.getLogger(__name__)
@@ -124,5 +124,7 @@ def render_chordpro(
 ) -> str:
     """タイムラインとアライメントから ChordPro を作る（保存・修正したアライメントからの再出力にも使う）"""
     opt = options or Options()
+    if opt.render.notation == "degree":
+        tl = with_degrees(tl)
     lines = to_beats(alignment, tl, notes, snap=opt.snap_to_notes) if alignment else []
     return build_chordpro(tl, lines, (info or SongInfo()).directives(), opt.render)

@@ -1,4 +1,5 @@
-"""コード名・調の解析と、調に合わせた綴り（例：G長調の ♭VII7 は A#7 ではなく F7）"""
+"""コード名・調の解析。コードの綴り（F#7/A# か Gb7/Bb か）は MIDI に書いてあるとおりにする
+（tsumugi が前後の文脈から臨時記号を決めている）。書いていない音（Harte の度数のベース "/5" など）だけここで綴る"""
 
 from __future__ import annotations
 
@@ -78,18 +79,35 @@ def parse_key(s: str) -> Key:
     return Key(s[:-1] if minor else s, minor)
 
 
+SIMPLE_NAMES = {"E#": "F", "B#": "C", "Cb": "B", "Fb": "E"}
+
+
+def simple_name(name: str) -> str:
+    """E#/B#/Cb/Fb と重変化記号を、ふつうの綴りにする"""
+    if name in SIMPLE_NAMES:
+        return SIMPLE_NAMES[name]
+    if len(name) > 2:  # "F##" "Bbb"
+        return SHARP_NAMES[name_to_pc(name)] if "#" in name else FLAT_NAMES[name_to_pc(name)]
+    return name
+
+
 @dataclass
 class ChordSym:
     root_pc: int | None  # None = N.C.
     quality: str = ""
     bass_pc: int | None = None
+    root_name: str = ""  # MIDI に書いてある綴り（"F#"）
+    bass_name: str = ""  # 同上。Harte の度数（"/5"）のときはルートから綴る
 
     def render(self, key: Key, simplify: bool = False) -> str:
+        """表示するコード名。綴りは書いてあるとおり（無ければ調に合わせる）。simplify なら E#/B#/Cb/Fb などを避ける"""
         if self.root_pc is None:
             return "N.C."
-        s = key.spell(self.root_pc, simplify) + self.quality
+        root = self.root_name or key.spell(self.root_pc)
+        s = (simple_name(root) if simplify else root) + self.quality
         if self.bass_pc is not None and self.bass_pc != self.root_pc:
-            s += "/" + key.spell(self.bass_pc, simplify)
+            bass = self.bass_name or key.spell(self.bass_pc)
+            s += "/" + (simple_name(bass) if simplify else bass)
         return s
 
 
@@ -109,11 +127,14 @@ def parse_chord(label: str) -> ChordSym:
         m = re.match(r"^([A-G][#b]*)(.*)$", label)
         root, qual = m.group(1), m.group(2)
     root_pc = name_to_pc(root)
-    bass_pc = None
+    bass_pc, bass_name = None, ""
     if bass:
         if bass[0] in LETTERS:
-            bass_pc = name_to_pc(bass)
-        else:  # Harte の度数表記 "/b7" など
+            bass_pc, bass_name = name_to_pc(bass), bass
+        else:  # Harte の度数表記 "/b7" など。ルートの文字から度数ぶん進めた文字で綴る
+            degree = bass.strip("#b")
             acc = bass.count("#") - bass.count("b")
-            bass_pc = (root_pc + DEGREE_SEMITONES[bass.strip("#b")] + acc) % 12
-    return ChordSym(root_pc, QUALITY_MAP.get(qual, qual), bass_pc)
+            bass_pc = (root_pc + DEGREE_SEMITONES[degree] + acc) % 12
+            letter = LETTERS[(LETTERS.index(root[0].upper()) + int(degree) - 1) % 7]
+            bass_name = _spell(letter, bass_pc) or ""
+    return ChordSym(root_pc, QUALITY_MAP.get(qual, qual), bass_pc, root, bass_name)

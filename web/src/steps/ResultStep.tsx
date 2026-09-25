@@ -44,6 +44,19 @@ export function ResultStep({ project: p, onBuild }: { project: ProjectDetail; on
         }
         actions={
           <>
+            <div className="toggle" role="group" aria-label="コードの書き方">
+              {(["name", "degree"] as const).map((n) => (
+                <button
+                  key={n}
+                  className={p.options.notation === n ? "on" : ""}
+                  disabled={update.isPending || p.busy}
+                  title={n === "degree" ? "調の主音からの度数（chord-romanizer）。ChordPro の保存もこの書き方になります" : undefined}
+                  onClick={() => p.options.notation !== n && setFormat({ notation: n })}
+                >
+                  {n === "name" ? "コード名" : "ディグリー"}
+                </button>
+              ))}
+            </div>
             <div className="toggle" role="group" aria-label="表示">
               <button className={view === "sheet" ? "on" : ""} onClick={() => setView("sheet")}>
                 譜面

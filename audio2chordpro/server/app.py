@@ -58,6 +58,7 @@ class OptionsModel(BaseModel):
     melody_prior: bool
     snap_to_notes: bool
     simplify: bool
+    notation: Literal["name", "degree"]  # コード名 / ディグリー
     head_outside: bool
     tail_grid: bool
     min_gap_bars: int
@@ -72,6 +73,7 @@ class OptionsPatch(BaseModel):
     melody_prior: bool | None = None
     snap_to_notes: bool | None = None
     simplify: bool | None = None
+    notation: Literal["name", "degree"] | None = None
     head_outside: bool | None = None
     tail_grid: bool | None = None
     min_gap_bars: int | None = None

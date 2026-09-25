@@ -9,7 +9,7 @@ AMT のテンポマップによくある誤りはここで直す：
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import mido
 import numpy as np
@@ -22,6 +22,7 @@ class ChordEvent:
     beat: float
     chord: ChordSym
     raw: str
+    label: str | None = None  # 表示をコード名の代わりにこれにする（ディグリー表記など）
 
 
 @dataclass
@@ -89,6 +90,8 @@ class Timeline:
         return k
 
     def chord_label(self, ev: ChordEvent, simplify: bool = False) -> str:
+        if ev.label is not None:
+            return ev.label
         return ev.chord.render(self.key_at(ev.beat), simplify)
 
     def chord_at(self, beat: float) -> ChordEvent | None:
@@ -398,3 +401,40 @@ def skyline(notes: list[Note]) -> list[Note]:
             continue
         out.append(n)
     return out
+
+
+# ================================================================== ディグリー表記
+def degree_labels(tl: Timeline) -> list[str]:
+    """各コードのディグリー（調の主音からの度数。例 VIm7、IV/V、bVI7/I）。chord-romanizer で前後の流れを見て決める。
+    主音は MIDI の調（転調も）。chord-romanizer が読めないコードは、コード名のままにする"""
+    from chord_romanizer import Romanizer
+
+    names = [tl.chord_label(ev) for ev in tl.chords]
+    seq = [
+        "N.C." if ev.chord.root_pc is None else (name, tl.key_at(ev.beat).tonic) for ev, name in zip(tl.chords, names)
+    ]
+    romanizer = Romanizer.strict(default_tonic=tl.keys[0][1].tonic if tl.keys else "C")
+    try:
+        events = romanizer.annotate_events(seq)
+    except ValueError:  # 読めないコードがある。そこを N.C. にしてやり直す
+        events = romanizer.annotate_events([x if _readable(x) else "N.C." for x in seq])
+    # N.C.（と読めなかったコード）は辞書で返ってくる。そこはコード名（N.C. は "N.C."）のまま
+    return [name if isinstance(e, dict) else e.roman for e, name in zip(events, names)]
+
+
+def _readable(item) -> bool:
+    from chord_romanizer import Romanizer
+
+    if not isinstance(item, tuple):
+        return True
+    try:
+        Romanizer.strict(default_tonic=item[1]).romanize(item[0])
+        return True
+    except ValueError:
+        return False
+
+
+def with_degrees(tl: Timeline) -> Timeline:
+    """コードをディグリーで表示するタイムライン（元は変えない）"""
+    labels = degree_labels(tl)
+    return replace(tl, chords=[replace(ev, label=lab) for ev, lab in zip(tl.chords, labels)])

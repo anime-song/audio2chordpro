@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class RenderOptions:
     simplify: bool = False  # E#/B#/Cb/Fb を F/C/B/E と綴る
+    notation: str = "name"  # コードの書き方 "name"（コード名）| "degree"（ディグリー。例 VIm7、IV/V）
     head_outside: bool = False  # 行頭のコードを括弧の外に書く: [C](はい…  （既定は内側: ([C]はい…）
     tail_grid: bool = True  # 行末の後ろ・行の途中の音節の間に積み重なるコードを小節グリッドで書く
     min_gap_bars: int = 2  # 間奏とみなす、歌っていない小節の数

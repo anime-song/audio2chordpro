@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     g = ap.add_argument_group("出力の書式")
     g.add_argument("--simplify", action="store_true", help="E#/B#/Cb/Fb を F/C/B/E と綴る")
+    g.add_argument("--degree", action="store_true", help="コードをディグリー（例 VIm7、IV/V）で書く（chord-romanizer）")
     g.add_argument("--head-outside", action="store_true", help="行頭のコードを括弧の外に書く")
     g.add_argument("--no-tail-grid", action="store_true", help="行末の後ろ・行の途中で続くコードを小節グリッドにしない")
     return ap
@@ -81,7 +82,12 @@ def main(argv=None) -> None:
         melody=args.melody,
         beats=args.beats,
         sheetsage_model=args.sheetsage_model,
-        render=RenderOptions(simplify=args.simplify, head_outside=args.head_outside, tail_grid=not args.no_tail_grid),
+        render=RenderOptions(
+            simplify=args.simplify,
+            notation="degree" if args.degree else "name",
+            head_outside=args.head_outside,
+            tail_grid=not args.no_tail_grid,
+        ),
     )
     if args.midi is None:
         args.midi = make_midi(args.audio, opt)
