@@ -2,56 +2,11 @@
 
 import json
 
-import numpy as np
 import pytest
-import soundfile as sf
-from test_timeline_chords import _make_midi
+from conftest import ALIGNMENT
 
-from audio2chordpro import project as project_mod
-from audio2chordpro.align import Alignment
 from audio2chordpro.project import Project, projects
 from audio2chordpro.timeline import midi_chords
-
-ALIGNMENT = {
-    "lines": [
-        {
-            "text": "あさ",
-            "tokens": [{"surface": "あさ", "reading": "アサ"}],
-            "morae": [{"kana": "あ", "start": 0.0, "end": 0.4}, {"kana": "さ", "start": 4.0, "end": 4.4}],
-        }
-    ]
-}
-
-
-@pytest.fixture
-def calls(monkeypatch):
-    """重い処理を置き換えて、呼ばれた回数を数える"""
-    n = {"vocals": 0, "align": 0}
-
-    def vocal_features(audio, opt):
-        n["vocals"] += 1
-        path = project_mod.ctc_path(audio, opt)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(path, np.zeros((1, 1)))
-
-    def align_audio(audio, lyrics, tl, notes, opt):
-        n["align"] += 1
-        return Alignment.from_dict(ALIGNMENT)
-
-    def no_tsumugi(*a, **k):
-        raise AssertionError("MIDI は set_midi で渡している")
-
-    monkeypatch.setattr(project_mod, "vocal_features", vocal_features)
-    monkeypatch.setattr(project_mod, "align_audio", align_audio)
-    monkeypatch.setattr(project_mod, "make_midi", no_tsumugi)
-    return n
-
-
-@pytest.fixture
-def song(tmp_path):
-    audio = tmp_path / "歌手A - 朝のうた.wav"
-    sf.write(str(audio), np.zeros(800, dtype=np.float32), 8000)
-    return audio, _make_midi(tmp_path / "amt.mid")
 
 
 def test_stages(tmp_path, song, calls):
@@ -74,16 +29,16 @@ def test_stages(tmp_path, song, calls):
     assert p.run() == {"midi": "done", "melody": "skipped", "vocals": "done", "align": "skipped", "render": "done"}
     assert p.output_path.name == "朝のうた.cho"
     assert p.chordpro().startswith("{title:朝のうた}\n{subtitle:歌：歌手A}")
-    assert calls == {"vocals": 1, "align": 0}
+    assert (calls["vocals"], calls["align"]) == (1, 0)
 
     # 歌詞を入れるとアライメントから後ろをやり直す。解析はやり直さない
     p.set_lyrics("あさ")
     assert p.status()["align"] == "pending"
     assert set(p.run().values()) <= {"done", "skipped"}
-    assert calls == {"vocals": 1, "align": 1}
+    assert (calls["vocals"], calls["align"]) == (1, 1)
     assert "あ" in p.chordpro()
     p.run()
-    assert calls == {"vocals": 1, "align": 1}
+    assert (calls["vocals"], calls["align"]) == (1, 1)
 
     # 出力の書式・曲情報を変えたら ChordPro だけ
     p.set_options(simplify=True)
@@ -92,7 +47,7 @@ def test_stages(tmp_path, song, calls):
     p.run()
     assert p.output_path.name == "朝の歌.cho" and not (p.dir / "output" / "朝のうた.cho").exists()
     assert p.song["sources"]["title"] == "manual"
-    assert calls == {"vocals": 1, "align": 1}
+    assert (calls["vocals"], calls["align"]) == (1, 1)
 
     # 拍の取り方を変えるとアライメントもやり直す
     p.set_options(melody_prior=False)
@@ -147,3 +102,21 @@ def test_run_rejects_unknown_stage(tmp_path, song):
         p.run("lyrics")
     with pytest.raises(TypeError):
         p.set_options(no_such_option=1)
+
+
+def test_changes_during_a_run_are_kept(tmp_path, song, calls):
+    """段階の実行中に設定・歌詞を変えても消えず、そのとき実行していた段階より後ろは古い扱いになる"""
+    p = Project.create(tmp_path / "projects", song[0], models_dir=tmp_path / "models")
+    p.set_options(melody="amt")
+    other = Project.open(p.dir)  # UI（別のスレッド）から開いたもの
+    calls["hook"] = lambda: (other.set_options(simplify=True), other.set_lyrics("あさ"))
+    p.run("analysis")
+    assert calls["midi"] == 1
+    assert p.options.render.simplify and p.lyrics == "あさ\n"
+    assert p.status() == {
+        "midi": "done",
+        "melody": "skipped",
+        "vocals": "done",
+        "align": "pending",
+        "render": "pending",
+    }

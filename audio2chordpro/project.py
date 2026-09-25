@@ -31,6 +31,8 @@ import json
 import logging
 import re
 import shutil
+import threading
+import time
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,10 +54,27 @@ _PER_PROJECT = ("cache_dir", "models_dir", "render")  # Options のうち projec
 
 
 class Project:
+    """project.json・song.json は使うたびに読み、書くときは読み直してから変える。
+    段階を実行している間（別のスレッド）に UI から設定・曲情報を変えても、どちらの書き込みも消えない"""
+
     def __init__(self, path: str | Path, models_dir: str | Path | None = None):
         self.dir = Path(path)
         self.models_dir = Path(models_dir) if models_dir else DEFAULT_MODELS_DIR
-        self.data = _read_json(self.dir / "project.json")
+        if not (self.dir / "project.json").exists():
+            raise FileNotFoundError(f"プロジェクトではありません: {self.dir}")
+
+    @property
+    def data(self) -> dict:
+        """project.json の中身（読むだけ。変えるときは _update）"""
+        with _lock(self.dir):
+            return _read_json(self.dir / "project.json")
+
+    def _update(self, change) -> None:
+        """project.json を読み直して change(data) で変えて書く"""
+        with _lock(self.dir):
+            data = _read_json(self.dir / "project.json")
+            change(data)
+            _write_json(self.dir / "project.json", data)
 
     # ------------------------------------------------------------ 作る・開く
     @classmethod
@@ -128,9 +147,6 @@ class Project:
         name = self.data["stages"].get("render", {}).get("output")
         return self.dir / "output" / name if name else None
 
-    def _save(self) -> None:
-        _write_json(self.dir / "project.json", self.data)
-
     # ------------------------------------------------------------ 設定
     @property
     def options(self) -> Options:
@@ -141,22 +157,27 @@ class Project:
 
     def set_options(self, **changes) -> None:
         """Options・RenderOptions の項目を名前で変える（例: set_options(melody="amt", simplify=True)）"""
-        d = self.data.setdefault("options", {})
         render_names = {f.name for f in fields(RenderOptions)}
         option_names = {f.name for f in fields(Options)} - set(_PER_PROJECT)
-        for k, v in changes.items():
-            if k in render_names:
-                d.setdefault("render", {})[k] = v
-            elif k in option_names:
-                d[k] = str(v) if isinstance(v, Path) else v
-            else:
-                raise TypeError(f"unknown option: {k}")
-        self._save()
+        unknown = set(changes) - render_names - option_names
+        if unknown:
+            raise TypeError(f"unknown option: {', '.join(sorted(unknown))}")
+
+        def change(data: dict) -> None:
+            d = data.setdefault("options", {})
+            for k, v in changes.items():
+                if k in render_names:
+                    d.setdefault("render", {})[k] = v
+                else:
+                    d[k] = str(v) if isinstance(v, Path) else v
+
+        self._update(change)
 
     # ------------------------------------------------------------ 曲情報
     @property
     def song(self) -> dict:
-        return _read_json(self.dir / "song.json")
+        with _lock(self.dir):
+            return _read_json(self.dir / "song.json")
 
     @property
     def info(self) -> SongInfo:
@@ -164,14 +185,15 @@ class Project:
 
     def set_info(self, source: str = "manual", **values: str) -> None:
         """曲情報の項目を変える（例: set_info(title="曲名", artist="歌手")）"""
-        names = {f.name for f in fields(SongInfo)}
-        song = self.song
-        for k, v in values.items():
-            if k not in names:
-                raise TypeError(f"unknown field: {k}")
-            song["info"][k] = v
-            song["sources"][k] = source
-        _write_json(self.dir / "song.json", song)
+        unknown = set(values) - {f.name for f in fields(SongInfo)}
+        if unknown:
+            raise TypeError(f"unknown field: {', '.join(sorted(unknown))}")
+        with _lock(self.dir):
+            song = self.song
+            for k, v in values.items():
+                song["info"][k] = v
+                song["sources"][k] = source
+            _write_json(self.dir / "song.json", song)
 
     def _fill_info(self, info: SongInfo, source: str) -> None:
         """空の項目・ファイル名から推した項目を info で埋める（タグ・手入力の項目はそのまま）"""
@@ -231,13 +253,7 @@ class Project:
         """手元の AMT の MIDI を使う（tsumugi を走らせない）"""
         self.midi_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(path, self.midi_path)
-        self.data["stages"]["midi"] = {
-            "inputs": _digest(self._inputs("midi")),
-            "at": _now(),
-            "source": "upload",
-            "file": Path(path).name,
-        }
-        self._save()
+        self._record("midi", _digest(self._inputs("midi")), source="upload", file=Path(path).name)
 
     def midi_chords(self) -> list[tuple[float, str]]:
         """MIDI のコード (秒, コード名)（コードを手で直すときの元）"""
@@ -258,7 +274,7 @@ class Project:
 
     def export_midi(self, out: str | Path | None = None) -> Path:
         """手で直したコードを書き込んだ MIDI を保存する（既定は output/<曲名>.mid）"""
-        out = Path(out) if out else self.dir / "output" / f"{self._output_stem()}.mid"
+        out = Path(out) if out else self.dir / "output" / f"{self.output_stem()}.mid"
         out.parent.mkdir(parents=True, exist_ok=True)
         chords = self.chords()
         if chords is None:
@@ -277,13 +293,12 @@ class Project:
         """手で直したアライメントを保存する（いまの歌詞に対するものとして記録する）"""
         d = alignment.to_dict() if isinstance(alignment, Alignment) else alignment
         _write_json(self.edited_alignment_path, d)
-        self.data["edits"]["alignment"] = {"lyrics": _text_sha1(self.lyrics), "at": _now()}
-        self._save()
+        rec = {"lyrics": _text_sha1(self.lyrics), "at": _now()}
+        self._update(lambda data: data["edits"].__setitem__("alignment", rec))
 
     def discard_alignment_edits(self) -> None:
         self.edited_alignment_path.unlink(missing_ok=True)
-        self.data["edits"].pop("alignment", None)
-        self._save()
+        self._update(lambda data: data["edits"].pop("alignment", None))
 
     @property
     def alignment_edits_outdated(self) -> bool:
@@ -341,7 +356,10 @@ class Project:
             log.info("[%s] %s", self.dir.name, s)
             if progress:
                 progress(s, "start")
-            getattr(self, f"_run_{s}")(state == "stale" or redo)
+            # 指紋は始める前の入力で取る（実行中に歌詞・設定が変われば、終わったあと "stale" になる）
+            inputs = _digest(self._inputs(s))
+            extra = getattr(self, f"_run_{s}")(state == "stale" or redo) or {}
+            self._record(s, inputs, **extra)
             if progress:
                 progress(s, "done")
         return self.status()
@@ -351,22 +369,21 @@ class Project:
         path = self.output_path
         return path.read_text(encoding="utf-8") if path and path.exists() else ""
 
-    # ---- 段階の中身（redo: 前の結果を消してから作り直す）
-    def _run_midi(self, redo: bool) -> None:
+    # ---- 段階の中身（redo: 前の結果を消してから作り直す）。返す dict は project.json の記録に足す
+    def _run_midi(self, redo: bool) -> dict:
         opt = self.options
         if redo:
             shutil.rmtree(Path(opt.cache_dir) / "tsumugi" / "out" / self.audio.stem, ignore_errors=True)
         midi = make_midi(self.audio, opt)
         self.midi_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(midi, self.midi_path)
-        self._record("midi", source="tsumugi")
+        return {"source": "tsumugi"}
 
     def _run_melody(self, redo: bool) -> None:
         opt = self.options
         if redo:
             shutil.rmtree(sheetsage_dir(self.audio, opt.cache_dir), ignore_errors=True)
         run_sheetsage(self.audio, opt.cache_dir, opt.sheetsage_model)
-        self._record("melody")
 
     def _run_vocals(self, redo: bool) -> None:
         opt = self.options
@@ -374,32 +391,31 @@ class Project:
             shutil.rmtree(Path(opt.cache_dir) / "sep" / "htdemucs" / self.audio.stem, ignore_errors=True)
             ctc_path(self.audio, opt).unlink(missing_ok=True)
         vocal_features(self.audio, opt)
-        self._record("vocals")
 
     def _run_align(self, redo: bool) -> None:
         opt = self.options
         tl, notes = prepare(self.audio, self.midi_path, opt)
         alignment = align_audio(self.audio, self.lyrics, tl, notes, opt)
         _write_json(self.auto_alignment_path, alignment.to_dict())
-        self._record("align")
 
-    def _run_render(self, redo: bool) -> None:
+    def _run_render(self, redo: bool) -> dict:
         opt = self.options
         tl, notes = prepare(self.audio, self.midi_path, opt, chords=self.chords())
         cho = render_chordpro(tl, self.alignment(), notes, self.info, opt)
         old = self.output_path
-        name = f"{self._output_stem()}.cho"
+        name = f"{self.output_stem()}.cho"
         (self.dir / "output").mkdir(exist_ok=True)
         (self.dir / "output" / name).write_text(cho, encoding="utf-8")
         if old and old.name != name:
             old.unlink(missing_ok=True)
-        self._record("render", output=name)
+        return {"output": name}
 
-    def _record(self, stage: str, **extra) -> None:
-        self.data["stages"][stage] = {"inputs": _digest(self._inputs(stage)), "at": _now(), **extra}
-        self._save()
+    def _record(self, stage: str, inputs: str, **extra) -> None:
+        rec = {"inputs": inputs, "at": _now(), **extra}
+        self._update(lambda data: data["stages"].__setitem__(stage, rec))
 
-    def _output_stem(self) -> str:
+    def output_stem(self) -> str:
+        """出力ファイルの名前（拡張子なし）。曲名、無ければ音源のファイル名"""
         return _safe_name(self.info.title or self.audio.stem)
 
     def _inputs(self, stage: str) -> dict | None:
@@ -455,16 +471,35 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_LOCKS: dict[Path, threading.RLock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock(d: Path) -> threading.RLock:
+    """プロジェクトごとのロック（同じプロセスのスレッドの間で、読み直し → 書き込みを1つずつにする）"""
+    key = d.resolve()
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, threading.RLock())
+
+
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_json(path: Path, data) -> None:
-    """書きかけのファイルを残さないよう、一時ファイルに書いてから置き換える"""
+    """書きかけのファイルを残さないよう、一時ファイルに書いてから置き換える。
+    Windows では読んでいる最中のファイルを置き換えられないので、少し待ってやり直す"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(path)
+    for i in range(20):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.05)
 
 
 def _file_sha1(path: Path) -> str:
