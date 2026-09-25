@@ -23,6 +23,9 @@ dependencies = [
     "transformers>=4.45,<5",
     "mir_eval",
     "demucs>=4.1",
+    # 歌詞サイトの検索（providers.lyrics）
+    "requests",
+    "beautifulsoup4",
 ]
 
 [project.scripts]
@@ -51,3 +54,6 @@ torchaudio = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32' or sy
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[dependency-groups]
+dev = ["pytest"]

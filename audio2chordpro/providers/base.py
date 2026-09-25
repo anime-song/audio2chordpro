@@ -1,11 +1,9 @@
-"""入力を自動で用意するための差し込み口（今は利用者がファイルで渡す）
+"""入力を自動で用意するための差し込み口
 
-将来の拡張の想定:
-  * MidiProvider   : 音源から AMT の MIDI（コード・調・拍・歌メロ）を作る（例: tsumugi）
-  * LyricsProvider : 曲名・歌手名から歌詞とメタデータを取ってくる（例: 歌詞サイトの検索）
+  * MidiProvider   : 音源から AMT の MIDI（コード・調・拍・歌メロ）を作る（例: tsumugi。未実装）
+  * LyricsProvider : 曲名・歌手名から歌詞とメタデータを取ってくる（実装: providers.lyrics の歌詞サイト）
 
-pipeline.transcribe はファイルパス／テキストを受け取るだけなので、これらを実装したら
-その出力をそのまま渡せばよい。
+pipeline.transcribe はファイルパス／テキストを受け取るだけなので、これらの出力をそのまま渡せばよい。
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from .song_info import SongInfo
+from ..song_info import SongInfo
 
 
 class MidiProvider(Protocol):

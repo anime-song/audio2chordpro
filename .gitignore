@@ -31,5 +31,5 @@ cache/
 *.ogg
 *.mid
 *.midi
-samples/
-lyrics/
+/samples/
+/lyrics/

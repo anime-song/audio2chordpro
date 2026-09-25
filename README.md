@@ -101,9 +101,9 @@ uv run audio2chordpro song.mp3 --midi song.mid -o chords.cho
 from audio2chordpro import Options, SongInfo, transcribe
 
 result = transcribe(
-    audio_path="song.mp3",
-    midi_path="song.mid",
-    lyrics_text=open("lyrics.txt", encoding="utf-8").read(),
+    audio="song.mp3",
+    midi="song.mid",
+    lyrics=open("lyrics.txt", encoding="utf-8").read(),
     info=SongInfo(title="曲名", artist="歌手"),
     options=Options(cache_dir="cache"),
 )
@@ -116,6 +116,26 @@ alignment_dict = result.alignment.to_dict()
 ```
 
 アライメント修正後の再レンダリングには `prepare()` と `render_chordpro()` を使用します。
+
+### 歌詞サイトから歌詞を取得
+
+曲名で歌詞サイトを検索し、候補から選んだ曲の歌詞とメタデータ（歌手・作詞・作曲・編曲）を取得できます。
+対応サイトは [うたてん](https://utaten.com/) です。歌ネット・歌time はボット対策（Cloudflare）でプログラムからの取得を受け付けないため対応していません。
+取得した歌詞は各サイトの利用規約に従い、個人的な利用の範囲で使ってください（リクエストは1秒以上の間隔をあけます）。
+
+```python
+from audio2chordpro import transcribe
+from audio2chordpro.providers.lyrics import fetch, search
+
+hits = search("曲名", artist="歌手名")  # 候補（SongHit: 曲名・歌手・作詞・作曲・編曲・歌い出し・URL）
+page = fetch(hits[0])                   # LyricsPage: info（SongInfo）・lyrics・lyrics_ruby（ふりがな付き）
+result = transcribe("song.mp3", "song.mid", page.lyrics, page.info)
+```
+
+```bash
+uv run python -m audio2chordpro.providers.lyrics 曲名 --artist 歌手名           # 候補の一覧
+uv run python -m audio2chordpro.providers.lyrics 曲名 --pick 1 -o lyrics.txt   # 1番目の歌詞を保存
+```
 
 ## 出力仕様
 
@@ -145,7 +165,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 ## 拡張インターフェース
 
 - **MIDI プロバイダ (`providers.MidiProvider`)**: 音源から AMT MIDI を自動生成するパイプライン（例: [tsumugi](https://github.com/anime-song/tsumugi) 連携など）
-- **歌詞プロバイダ (`providers.LyricsProvider`)**: 楽曲メタデータからの歌詞自動取得
+- **歌詞プロバイダ (`providers.LyricsProvider`)**: 楽曲メタデータからの歌詞自動取得。歌詞サイトによる実装が `providers.lyrics.SiteLyricsProvider`。サイトを増やすときは `providers/lyrics/` に `LyricsSite` のサブクラス（`search_url` / `parse_search` / `parse_song`）を足して `SITES` に登録する
 - **UI / 手動補正**: `Alignment` オブジェクトの JSON 出力（`to_dict` / `from_dict`）を介して、外部エディタでの修正・再レンダリングが可能
 
 ## モジュール構成
@@ -161,7 +181,9 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/melody.py` | 歌メロノート抽出（MIDI / SheetSage2 ラッパー） |
 | `audio2chordpro/render.py` | モーラ・ノート対応付け、音節グリッド配置、ChordPro 文字列生成 |
 | `audio2chordpro/song_info.py` | 楽曲メタデータとディレクティブ生成 |
-| `audio2chordpro/providers.py` | MIDI / 歌詞供給インターフェース定義 |
+| `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
+| `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
+| `tests/` | パーサのテスト（`uv run pytest`、ネットにはつながない） |
 
 ## クレジット・ライセンス
 
