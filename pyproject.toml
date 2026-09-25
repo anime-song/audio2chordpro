@@ -26,6 +26,13 @@ dependencies = [
     # 歌詞サイトの検索（providers.lyrics）
     "requests",
     "beautifulsoup4",
+    # tsumugi（providers.midi。ソースは実行時に GitHub から取得）の依存
+    "dlchordx",
+    "pyyaml",
+    "tqdm",
+    "stem-splitter",
+    "chord-romanizer",
+    "torchcodec<0.8",  # stem-splitter が必要とする。torch 2.8 に合う版（WAV の保存は soundfile に替えている）
 ]
 
 [project.scripts]

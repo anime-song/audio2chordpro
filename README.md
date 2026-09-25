@@ -35,7 +35,7 @@ SheetSage2 ─ 歌メロノート ───────────────�
 ## 入力要件
 
 - **音源**: MP3 / WAV
-- **AMT MIDI**: 以下のトラックを含む標準 MIDI ファイル
+- **AMT MIDI**（省略可。省略時は [tsumugi](https://github.com/anime-song/tsumugi) で音源から作る）: 以下のトラックを含む標準 MIDI ファイル
   - `Predicted Tempo Map`: テンポ、拍子、調（key_signature）
   - `Predicted Chords`: marker イベントに Harte 表記のコード名（例: `A:min7`, `C:maj7/5`）。このトラックに無ければ、他のトラック（テンポマップなど）の marker を使う
   - `melody`: 歌メロトラック（`--melody amt` 指定時に使用）
@@ -81,9 +81,17 @@ uv run audio2chordpro song.mp3 --midi song.mid --alignment song.align.json -o so
 
 # 歌詞なし（コード譜のみ出力）
 uv run audio2chordpro song.mp3 --midi song.mid -o chords.cho
+
+# MIDI なし（tsumugi で音源から作る。作った MIDI は --save-midi で保存できる）
+uv run audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho --save-midi song.mid
 ```
 
-中間処理結果（ボーカル分離、CTC、SheetSage2 出力）は `./cache`（`--cache-dir` で変更可）にキャッシュされます。
+中間処理結果（tsumugi の MIDI、ボーカル分離、CTC、SheetSage2 出力）は `./cache`（`--cache-dir` で変更可）にキャッシュされます。
+
+#### tsumugi（MIDI の自動生成）
+
+`--midi` を省略すると [tsumugi](https://github.com/anime-song/tsumugi) で、ステム分離 → ステムごとの採譜 → ビート・コード・調の推定を行い、
+その MIDI（`<曲名>_beat_chord.mid`）を使います。
 
 #### 主なオプション
 
@@ -94,6 +102,7 @@ uv run audio2chordpro song.mp3 --midi song.mid -o chords.cho
 | `--simplify` | `false` | 異名同音の簡略表記（E#, B#, Cb, Fb → F, C, B, E） |
 | `--head-outside` | `false` | 行頭コードを括弧の外側に配置（デフォルトは `（[C]はい）`） |
 | `--no-tail-grid` | `false` | 行末以降・行中のコード小節グリッド展開を無効化 |
+| `--save-midi` | – | tsumugi で作った MIDI をコピーする先 |
 
 ### Python API
 
@@ -128,7 +137,7 @@ from audio2chordpro import transcribe
 from audio2chordpro.providers.lyrics import fetch, search
 
 hits = search("曲名", artist="歌手名")  # 候補（SongHit: 曲名・歌手・作詞・作曲・編曲・歌い出し・URL）
-page = fetch(hits[0])                   # LyricsPage: info（SongInfo）・lyrics・lyrics_ruby（ふりがな付き）
+page = fetch(hits[0])  # LyricsPage: info（SongInfo）・lyrics・lyrics_ruby（ふりがな付き）
 result = transcribe("song.mp3", "song.mid", page.lyrics, page.info)
 ```
 
@@ -164,7 +173,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 
 ## 拡張インターフェース
 
-- **MIDI プロバイダ (`providers.MidiProvider`)**: 音源から AMT MIDI を自動生成するパイプライン（例: [tsumugi](https://github.com/anime-song/tsumugi) 連携など）
+- **MIDI プロバイダ (`providers.MidiProvider`)**: 音源から AMT MIDI を自動生成する。[tsumugi](https://github.com/anime-song/tsumugi) による実装が `providers.midi.TsumugiMidiProvider`
 - **歌詞プロバイダ (`providers.LyricsProvider`)**: 楽曲メタデータからの歌詞自動取得。歌詞サイトによる実装が `providers.lyrics.SiteLyricsProvider`。サイトを増やすときは `providers/lyrics/` に `LyricsSite` のサブクラス（`search_url` / `parse_search` / `parse_song`）を足して `SITES` に登録する
 - **UI / 手動補正**: `Alignment` オブジェクトの JSON 出力（`to_dict` / `from_dict`）を介して、外部エディタでの修正・再レンダリングが可能
 
@@ -182,6 +191,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/render.py` | モーラ・ノート対応付け、音節グリッド配置、ChordPro 文字列生成 |
 | `audio2chordpro/song_info.py` | 楽曲メタデータとディレクティブ生成 |
 | `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
+| `audio2chordpro/providers/midi/` | 音源からの MIDI 生成（`tsumugi.py`） |
 | `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
 | `tests/` | パーサのテスト（`uv run pytest`、ネットにはつながない） |
 
@@ -190,4 +200,5 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 - **漢字読みデータ**: [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) (© EDRDG, CC BY-SA 4.0)
 - **CTC 音響モデル**: [reazon-research/japanese-wav2vec2-base-rs35kh](https://huggingface.co/reazon-research/japanese-wav2vec2-base-rs35kh) (Apache-2.0)
 - **歌メロ採譜モデル**: [SheetSage2](https://huggingface.co/m-a-p/SheetSage2) (CC BY-NC 4.0)
+- **AMT（MIDI の自動生成）**: [tsumugi](https://github.com/anime-song/tsumugi) (MIT)。ステム分離に [stem-splitter](https://pypi.org/project/stem-splitter/)
 - **要素技術・ライブラリ**: [Demucs](https://github.com/facebookresearch/demucs), [pyopenjtalk-plus](https://github.com/tsukumijima/pyopenjtalk-plus), [alkana](https://github.com/cod-sushi/alkana.py)

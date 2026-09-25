@@ -3,6 +3,7 @@
 python -m audio2chordpro song.mp3 --midi song.mid --lyrics lyrics.txt -o song.cho --title 曲名 --artist 歌手
 python -m audio2chordpro song.mp3 --midi song.mid -o chords.cho                  # 歌詞なし（コード譜だけ）
 python -m audio2chordpro song.mp3 --midi song.mid --alignment song.align.json -o song.cho   # 保存したアライメントから再出力
+python -m audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho                  # MIDI なし（tsumugi で作る）
 """
 
 from __future__ import annotations
@@ -10,20 +11,21 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 
 from .align import Alignment
 from .melody import SHEETSAGE_MODEL
-from .pipeline import Options, prepare, render_chordpro, transcribe
+from .pipeline import Options, make_midi, prepare, render_chordpro, transcribe
 from .render import RenderOptions
 from .song_info import SongInfo
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="audio2chordpro", description="音源 + AMT の MIDI + 歌詞 → ChordPro")
+    ap = argparse.ArgumentParser(prog="audio2chordpro", description="音源 + AMT の MIDI（省略時は tsumugi で作る）+ 歌詞 → ChordPro")
     ap.add_argument("audio", type=Path, help="音源（mp3 / wav）")
-    ap.add_argument("--midi", type=Path, required=True, help="AMT の MIDI（コード・調・拍・歌メロ）")
+    ap.add_argument("--midi", type=Path, help="AMT の MIDI（コード・調・拍・歌メロ）。省略時は tsumugi で作る")
     ap.add_argument("--lyrics", type=Path, help="歌詞のテキストファイル（UTF-8、空行 = 段落）")
     ap.add_argument("-o", "--out", type=Path, help="出力する ChordPro（省略時は標準出力）")
     g = ap.add_argument_group("メタデータ")
@@ -35,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("arranger", "編曲"),
     ):
         g.add_argument(f"--{name}", default="", help=label)
+    g = ap.add_argument_group("MIDI（tsumugi）")
+    g.add_argument("--save-midi", type=Path, help="tsumugi で作った MIDI をここにコピーする")
     g = ap.add_argument_group("アライメント")
     g.add_argument("--save-alignment", type=Path, help="モーラごとの時刻を JSON で保存する")
     g.add_argument("--alignment", type=Path, help="保存したアライメントを使う（音声処理をしない）")
@@ -69,6 +73,10 @@ def main(argv=None) -> None:
         sheetsage_model=args.sheetsage_model,
         render=RenderOptions(simplify=args.simplify, head_outside=args.head_outside, tail_grid=not args.no_tail_grid),
     )
+    if args.midi is None:
+        args.midi = make_midi(args.audio, opt)
+        if args.save_midi:
+            shutil.copy(args.midi, args.save_midi)
     if args.alignment:
         tl, notes = prepare(args.audio, args.midi, opt)
         alignment = Alignment.from_dict(json.loads(args.alignment.read_text(encoding="utf-8")))

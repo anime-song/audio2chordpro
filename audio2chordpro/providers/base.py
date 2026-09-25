@@ -1,6 +1,6 @@
 """入力を自動で用意するための差し込み口
 
-  * MidiProvider   : 音源から AMT の MIDI（コード・調・拍・歌メロ）を作る（例: tsumugi。未実装）
+  * MidiProvider   : 音源から AMT の MIDI（コード・調・拍・歌メロ）を作る（実装: providers.midi の tsumugi）
   * LyricsProvider : 曲名・歌手名から歌詞とメタデータを取ってくる（実装: providers.lyrics の歌詞サイト）
 
 pipeline.transcribe はファイルパス／テキストを受け取るだけなので、これらの出力をそのまま渡せばよい。
