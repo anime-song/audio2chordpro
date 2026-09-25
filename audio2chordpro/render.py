@@ -46,6 +46,7 @@ class LyricLine:
     off: np.ndarray  # 各モーラの終了 [拍]
     conf: np.ndarray  # 各モーラの時刻が音響的に確かか
     paragraph_start: bool = False
+    note_off: np.ndarray | None = None  # 各モーラが歌うノートの終わり [拍]（ノートに対応づけたとき。NaN = 不明）
 
     @property
     def start(self) -> float:
@@ -173,7 +174,10 @@ def snap_to_notes(
     i, j = M, int(np.argmin(D[M] + (N - np.arange(N + 1)) * skip_note))
     snapped = mor.copy()
     assigned = np.zeros(M, bool)
+    last_note = np.full(M, -1)  # モーラが歌う最後のノート（メリスマなら最後の音）
     while i > 0:
+        if K[i, j] != 0 and last_note[i - 1] < 0:
+            last_note[i - 1] = j - 1
         if K[i, j] == 0:
             i -= 1
         elif K[i, j] == 2:
@@ -186,9 +190,11 @@ def snap_to_notes(
         idx = np.arange(M)
         ok = idx[assigned]
         snapped = np.where(assigned, snapped, mor + np.interp(idx, ok, snapped[ok] - mor[ok]))
+    note_off = np.where(last_note >= 0, off[np.maximum(last_note, 0)], np.nan)
     k = 0
     for L in lines:
         L.on = np.maximum.accumulate(snapped[k : k + len(L.on)])
+        L.note_off = note_off[k : k + len(L.on)]
         k += len(L.on)
 
 
@@ -316,8 +322,11 @@ def render_line(line: LyricLine, pl: Placement, head_outside: bool = False) -> s
 
 
 # ================================================================== グリッド
-def render_grid(tl: Timeline, bar0: int, bar1: int, simplify: bool = False, bars_per_line: int = 4) -> list[str]:
-    """小節 bar0..bar1-1 を「[C]---- ----|[F]---- [G]----|」の形（- = 8分）で。拍子が変わる小節には (3/4) を前置"""
+def render_grid(
+    tl: Timeline, bar0: int, bar1: int, simplify: bool = False, bars_per_line: int = 4, restate: bool = True
+) -> list[str]:
+    """小節 bar0..bar1-1 を「[C]---- ----|[F]---- [G]----|」の形（- = 8分）で。拍子が変わる小節には (3/4) を前置。
+    restate: 行頭で、前から鳴っているコードを書き直す"""
     lines = []
     for L0 in range(bar0, bar1, bars_per_line):
         s = ""
@@ -327,7 +336,7 @@ def render_grid(tl: Timeline, bar0: int, bar1: int, simplify: bool = False, bars
             if bar > 0 and n != tl.bar_len(bar - 1):
                 s += f"({n}/4)"
             evs = {int(round((e.beat - b0) * 2)): e for e in tl.chords if b0 - 1e-6 <= e.beat < b0 + n - 1e-6}
-            if bar == L0 and 0 not in evs and tl.chord_at(b0) is not None:
+            if restate and bar == L0 and 0 not in evs and tl.chord_at(b0) is not None:
                 evs[0] = tl.chord_at(b0)  # 行頭では鳴っているコードを書き直す
             for k in range(slots):
                 if k == slots // 2:
@@ -361,22 +370,47 @@ def render_tail(tl: Timeline, last_on: float, chords: list[tuple[float, str]]) -
     return _dashes(tl, bar, first, tl.bar_len(bar) * 2, chords) + "|"
 
 
+def starts_bar(tl: Timeline, beat: float) -> bool:
+    """拍が小節の頭（±16分）か"""
+    return abs(beat - tl.bar_start(tl.bar_index(beat + 0.25))) < 0.25
+
+
+def gap_as_grid(tl: Timeline, a: float, b: float) -> bool:
+    """行の途中の空きを、改行して音節の小節からグリッドで書くか（音節が小節の頭で、次の音節が次の小節以降）"""
+    return tl.bar_index(b) > tl.bar_index(a + 0.25) and starts_bar(tl, a)
+
+
 def render_gap(tl: Timeline, a: float, b: float, chords: list[tuple[float, str]], simplify: bool = False) -> str:
     """行の途中で、拍 a に始まる音節から拍 b に始まる次の音節までを「-」と小節線で埋める。
-    丸ごと空く小節はグリッドの行にして改行し、次の音節の前はその小節の頭から「-」で埋める"""
-    bar_a, bar_b = tl.bar_index(a), tl.bar_index(b)
-    first = int(round((a - tl.bar_start(bar_a)) * 2)) + 1
+    * 音節が小節の頭なら、改行してその小節からグリッドにする（音節のコードはグリッドの頭と重なるので括弧付きで書く）
+    * そうでなければ音節の後ろから「-」で埋め、丸ごと空く小節はグリッドの行にして改行する
+    * 次の音節の前はその小節の頭から「-」で埋める（グリッドの最後の行が4小節に満たなければその行に続ける）"""
+    bar_b = tl.bar_index(b)
     last = int(round((b - tl.bar_start(bar_b)) * 2))
+    in_b = [c for c in chords if tl.bar_index(c[0]) >= bar_b]
+
+    def lead(restate: bool) -> str:
+        b0, ev = tl.bar_start(bar_b), tl.chord_at(tl.bar_start(bar_b))
+        if restate and last and ev is not None and ev.beat < b0 - 1e-6:  # 行頭では前の小節から鳴っているコードを書き直す
+            return _dashes(tl, bar_b, 0, last, [(b0, tl.chord_label(ev, simplify))] + in_b)
+        return _dashes(tl, bar_b, 0, last, in_b)
+
+    if gap_as_grid(tl, a, b):
+        bar_a = tl.bar_index(a + 0.25)
+        grid = render_grid(tl, bar_a, bar_b, simplify)
+        if not last:
+            return "\n" + "\n".join(grid) + "\n"
+        if (bar_b - bar_a) % 4:
+            return "\n" + "\n".join(grid[:-1] + [grid[-1] + lead(False)])
+        return "\n" + "\n".join(grid) + "\n" + lead(True)
+    bar_a = tl.bar_index(a)
+    first = int(round((a - tl.bar_start(bar_a)) * 2)) + 1
     if bar_a == bar_b:
         return _dashes(tl, bar_a, first, last, chords)
     s = _dashes(tl, bar_a, first, tl.bar_len(bar_a) * 2, [c for c in chords if tl.bar_index(c[0]) <= bar_a]) + "|"
-    in_b = [c for c in chords if tl.bar_index(c[0]) >= bar_b]
     if bar_b > bar_a + 1:  # 丸ごと空く小節（コードは render_grid が書く）
-        s += "\n" + "\n".join(render_grid(tl, bar_a + 1, bar_b, simplify)) + "\n"
-        b0, ev = tl.bar_start(bar_b), tl.chord_at(tl.bar_start(bar_b))
-        if last and ev is not None and ev.beat < b0 - 1e-6:  # 行頭では前の小節から鳴っているコードを書き直す
-            in_b.insert(0, (b0, tl.chord_label(ev, simplify)))
-    return s + _dashes(tl, bar_b, 0, last, in_b)
+        return s + "\n" + "\n".join(render_grid(tl, bar_a + 1, bar_b, simplify)) + "\n" + lead(True)
+    return s + lead(False)
 
 
 def line_gaps(tl: Timeline, line: LyricLine, tol: float = 0.5) -> list[tuple[int, float, float]]:
@@ -478,6 +512,18 @@ def build_chordpro(
                 if not any(max(ra, tl.bar_index(a)) < min(rb, tl.bar_index(b) + 1) for ra, rb in inter)
             ]
     runs = _grid_bars(tl, lines, n_bars, opt, inter)
+    # 最後の音節が小節の頭で、その後ろに2小節以上の歌わない区間が続く行：グリッドを最後の音節の小節から始め、
+    # 音節のコードは括弧付きで書く（小節の途中からグリッドを書くと位置を追いにくいので）
+    paren_tail = {}
+    key_bars = {tl.bar_index(b + 1e-6) for b, _ in tl.keys[1:]}
+    for i, L in enumerate(lines if opt.tail_grid else []):
+        h = int(np.where(syllable_heads(line_morae(L.tokens)))[0][-1])
+        B = tl.bar_index(L.on[h] + 0.25)
+        run = [r for r in runs if r[0] == B + 1 and r[1] - r[0] >= 2]
+        alone = not any(M is not L and tl.bar_index(M.start) == B for M in lines)  # 同じ小節で次の行が始まらない
+        if run and alone and starts_bar(tl, L.on[h]) and tl.bar_index(L.last_on) <= B and B + 1 not in key_bars:
+            runs[runs.index(run[0])] = (B, run[0][1])
+            paren_tail[i] = (h, B)
     spans = [(tl.bar_start(a), tl.bar_start(b)) for a, b in runs]
     all_on = np.concatenate([L.on for L in lines]) if lines else np.array([])
 
@@ -512,7 +558,17 @@ def build_chordpro(
             target = nxt[0][2] if nxt else None
         else:
             target = prev[-1][2]
-            if ev.beat > lines[target].last_on + tol and nxt and lines[nxt[0][2]].start - ev.beat <= opt.head_window:
+            L = lines[target]
+            near_next = nxt and lines[nxt[0][2]].start - ev.beat <= opt.head_window
+            # 最後の音節を歌い終えた後（ノートが切れた後）に変わり、そのまま次の行が始まるコードは、食いではなく次の行の頭
+            ended = (
+                L.note_off is not None
+                and ev.beat > L.last_on
+                and L.note_off[-1] <= ev.beat + 1e-6
+                and nxt
+                and not any(ev.beat < e.beat < lines[nxt[0][2]].start - tol for e in tl.chords)
+            )
+            if near_next and (ev.beat > L.last_on + tol or ended):
                 target = nxt[0][2]  # 前の行を歌い終えた後、次の行の直前 → 次の行頭
         if target is None:
             continue
@@ -521,19 +577,29 @@ def build_chordpro(
         else:
             place_in_line(lines[target], ev.beat, lab, places[target], tol)
 
+    for i, (h, B) in paren_tail.items():  # グリッドの頭と重なる、最後の音節のコード
+        ev = tl.chord_at(tl.bar_start(B) + 1e-6)
+        if ev is not None and ev.beat >= tl.bar_start(B) - tol:
+            places[i].before.setdefault(h, []).append(f"({tl.chord_label(ev, opt.simplify)})")
     for (i, k), chords in gap_chords.items():
         (_, a, b) = next(g for g in gaps[i] if g[0] == k)
         places[i].gap[k] = render_gap(tl, a, b, chords, opt.simplify)
+        if gap_as_grid(tl, a, b):  # 音節のコードはグリッドの頭と重なるので括弧付き
+            heads = syllable_heads(line_morae(lines[i].tokens))
+            h = max(j for j in range(k + 1) if heads[j])
+            places[i].before[h] = [f"({x})" for x in places[i].before.get(h, [])]
 
     out = list(header or [])
     out.append(f"{{c:BPM={round(tl.bpm)}　{bpb}/4拍子　-:8分音符}}")
     out.append(f"{{key:{tl.keys[0][1]}}}")
     key_q = list(tl.keys[1:])
-    for kind, start, ref in blocks:
+    merged = set()  # 前の行の後ろに続けて書いたグリッド
+    for n, (kind, start, ref) in enumerate(blocks):
         while key_q and key_q[0][0] <= start + 1 + (bpb if kind == "line" else 0):
             out.append(f"{{key:{key_q.pop(0)[1]}}}")
         if kind == "grid":
-            out += render_grid(tl, *ref, simplify=opt.simplify)
+            if n not in merged:
+                out += render_grid(tl, *ref, simplify=opt.simplify)
             continue
         L = lines[ref]
         if L.paragraph_start and out and out[-1] != "":
@@ -541,5 +607,13 @@ def build_chordpro(
         text = render_line(L, places[ref], opt.head_outside)
         if tails.get(ref):
             text += render_tail(tl, L.last_on, tails[ref])
+        # 行末のすぐ後ろの短いグリッド（行末と合わせて2小節まで、転調なし）は同じ行に続けて書く
+        if ref in tails and n + 1 < len(blocks) and blocks[n + 1][0] == "grid":
+            a, b = blocks[n + 1][2]
+            width = (b - a) + (1 if tails[ref] else 0)
+            short = width <= 2 and not places[ref].gap and not (key_q and key_q[0][0] < tl.bar_start(b))
+            if a == tl.bar_index(L.last_on) + 1 and short:
+                text += "".join(render_grid(tl, a, b, opt.simplify, bars_per_line=4, restate=False))
+                merged.add(n + 1)
         out.append(text)
     return "\n".join(out) + "\n"

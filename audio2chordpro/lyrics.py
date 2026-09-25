@@ -343,6 +343,8 @@ def tokenize(line: str) -> list[Token]:
             t = Token(g, k or "".join(kata(w["read"]) for w in _ojt().run_frontend(g) if w["mora_size"]))
             if not k:
                 t.candidates = []
+            elif k.endswith("ング"):  # BANG は「バン」と歌うことが多い（どちらかは音響で選ぶ）
+                t.candidates = [k, k[:-1]]
             toks.append(t)
         else:
             digits = unicodedata.normalize("NFKC", g)
