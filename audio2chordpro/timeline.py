@@ -218,16 +218,45 @@ def _abs_events(track):
         yield t, msg
 
 
-def load_timeline(path: str, beats=None, quantize: float = 0.5, melody_track: str = "melody") -> Timeline:
-    """AMT の MIDI を読み込む。
+@dataclass
+class _Midi:
+    """MIDI のテンポ・調・拍子と、コードの marker"""
 
-    beats: 外部のビート推定 (拍[s], 小節頭[s])。与えるとテンポマップの代わりに拍グリッドにする。
-           コード・調は常に MIDI のもの（秒に直してから拍グリッドに載せる）。
-    quantize: コードの開始位置を丸める単位 [拍]（0.5 = 8分）"""
+    mid: mido.MidiFile
+    tempos: list[tuple[int, int]]  # (tick, μs/拍)。先頭は tick 0
+    key_ticks: list[tuple[int, str]]
+    tsigs: list[tuple[int, int, int]]
+    chord_ticks: list[tuple[int, str]]
+    chord_tracks: list[int]  # コードの marker を書いてあるトラック
+
+    def t2s(self, tick) -> float:
+        tpb = self.mid.ticks_per_beat
+        s, pt, ptempo = 0.0, 0, self.tempos[0][1]
+        for tt, tp in self.tempos:
+            if tt > tick:
+                break
+            s += (tt - pt) * ptempo / 1e6 / tpb
+            pt, ptempo = tt, tp
+        return s + (tick - pt) * ptempo / 1e6 / tpb
+
+    def s2t(self, sec: float) -> int:
+        tpb = self.mid.ticks_per_beat
+        s, pt, ptempo = 0.0, 0, self.tempos[0][1]
+        for tt, tp in self.tempos:
+            seg = (tt - pt) * ptempo / 1e6 / tpb
+            if s + seg > sec:
+                break
+            s += seg
+            pt, ptempo = tt, tp
+        return max(int(round(pt + (sec - s) * 1e6 * tpb / ptempo)), 0)
+
+
+def _read_midi(path) -> _Midi:
     mid = mido.MidiFile(path)
-    tpb = mid.ticks_per_beat
-    tempos, key_ticks, tsigs, chord_ticks, other_markers = [], [], [], [], []
-    for tr in mid.tracks:
+    tempos, key_ticks, tsigs = [], [], []
+    chords: dict[int, list] = {}  # トラック → marker
+    others: dict[int, list] = {}
+    for i, tr in enumerate(mid.tracks):
         for t, msg in _abs_events(tr):
             if msg.type == "set_tempo":
                 tempos.append((t, msg.tempo))
@@ -236,21 +265,69 @@ def load_timeline(path: str, beats=None, quantize: float = 0.5, melody_track: st
             elif msg.type == "time_signature":
                 tsigs.append((t, msg.numerator, msg.denominator))
             elif msg.type == "marker":
-                (chord_ticks if tr.name.lower().startswith("predicted chord") else other_markers).append((t, msg.text))
+                (chords if tr.name.lower().startswith("predicted chord") else others).setdefault(i, []).append(
+                    (t, msg.text)
+                )
     # コードの marker がテンポマップのトラックに書かれている MIDI もある
-    chord_ticks = sorted(chord_ticks or other_markers, key=lambda x: x[0])
+    chords = chords or others
     tempos.sort()
     if not tempos or tempos[0][0] != 0:
         tempos.insert(0, (0, 500000))
+    chord_ticks = sorted((x for v in chords.values() for x in v), key=lambda x: x[0])
+    return _Midi(mid, tempos, key_ticks, tsigs, chord_ticks, sorted(chords))
 
-    def t2s(tick):
-        s, pt, ptempo = 0.0, 0, tempos[0][1]
-        for tt, tp in tempos:
-            if tt > tick:
-                break
-            s += (tt - pt) * ptempo / 1e6 / tpb
-            pt, ptempo = tt, tp
-        return s + (tick - pt) * ptempo / 1e6 / tpb
+
+def midi_chords(path) -> list[tuple[float, str]]:
+    """MIDI のコード (秒, コード名) の列（手で直すときの元）"""
+    m = _read_midi(path)
+    return [(m.t2s(t), lab) for t, lab in m.chord_ticks]
+
+
+def write_chords_midi(path, chords: list[tuple[float, str]], out) -> None:
+    """MIDI のコードの marker を chords (秒, コード名) に置き換えて out に保存する（テンポ・ノートはそのまま）"""
+    m = _read_midi(path)
+    mid = m.mid
+    for i in m.chord_tracks:
+        _set_events(mid.tracks[i], [(t, msg) for t, msg in _abs_events(mid.tracks[i]) if msg.type != "marker"])
+    track = next((tr for tr in mid.tracks if tr.name.lower().startswith("predicted chord")), None)
+    if track is None:
+        track = mido.MidiTrack([mido.MetaMessage("track_name", name="Predicted Chords", time=0)])
+        mid.tracks.append(track)
+    events = [(t, msg) for t, msg in _abs_events(track)]
+    events += [(m.s2t(sec), mido.MetaMessage("marker", text=lab)) for sec, lab in sorted(chords)]
+    _set_events(track, events)
+    mid.save(str(out))
+
+
+def _set_events(track, events) -> None:
+    """絶対 tick のイベントでトラックを作り直す（end_of_track は最後に1つ）"""
+    events = sorted(((t, msg) for t, msg in events if msg.type != "end_of_track"), key=lambda x: x[0])
+    end = max([t for t, msg in _abs_events(track)] + [t for t, _ in events] + [0])
+    track.clear()
+    prev = 0
+    for t, msg in events:
+        track.append(msg.copy(time=t - prev))
+        prev = t
+    track.append(mido.MetaMessage("end_of_track", time=end - prev))
+
+
+def load_timeline(
+    path: str,
+    beats=None,
+    quantize: float = 0.5,
+    melody_track: str = "melody",
+    chords: list[tuple[float, str]] | None = None,
+) -> Timeline:
+    """AMT の MIDI を読み込む。
+
+    beats: 外部のビート推定 (拍[s], 小節頭[s])。与えるとテンポマップの代わりに拍グリッドにする。
+           コード・調は常に MIDI のもの（秒に直してから拍グリッドに載せる）。
+    quantize: コードの開始位置を丸める単位 [拍]（0.5 = 8分）
+    chords: (秒, コード名) の列。与えると MIDI のコードの代わりに使う（ユーザーが手で直したコード）"""
+    m = _read_midi(path)
+    mid, tpb, key_ticks, tsigs, t2s = m.mid, m.mid.ticks_per_beat, m.key_ticks, m.tsigs, m.t2s
+    if chords is None:
+        chords = [(t2s(t), lab) for t, lab in m.chord_ticks]
 
     end_tick = max(t for tr in mid.tracks for t, _ in _abs_events(tr))
     beat_ticks, bpb = _beat_ticks(tsigs, tpb, end_tick)
@@ -266,8 +343,8 @@ def load_timeline(path: str, beats=None, quantize: float = 0.5, melody_track: st
     tl = Timeline(beat_times, bpb, repairs=log, bar_starts=bar_starts)
 
     # コード：秒 → 拍 → 量子化。同じ位置は後勝ち（前のは瞬間的な誤検出とみなす）、同じコードの連続はまとめる
-    for tick, lab in chord_ticks:
-        b = float(tl.sec2beat(t2s(tick)))
+    for sec, lab in sorted(chords, key=lambda x: x[0]):
+        b = float(tl.sec2beat(sec))
         if quantize:
             b = round(b / quantize) * quantize
         ev = ChordEvent(b, parse_chord(lab), lab)

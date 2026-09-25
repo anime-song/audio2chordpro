@@ -46,8 +46,15 @@ def make_midi(audio: str | Path, options: Options | None = None) -> Path:
     return TsumugiMidiProvider(opt.cache_dir, models_dir=opt.models_dir)(audio)
 
 
-def prepare(audio: str | Path, midi: str | Path | None = None, options: Options | None = None) -> tuple[Timeline, list]:
-    """拍タイムライン（コード・調・拍）と歌メロのノートを用意する（必要なら tsumugi・SheetSage2 を実行）"""
+def prepare(
+    audio: str | Path,
+    midi: str | Path | None = None,
+    options: Options | None = None,
+    chords: list[tuple[float, str]] | None = None,
+) -> tuple[Timeline, list]:
+    """拍タイムライン（コード・調・拍）と歌メロのノートを用意する（必要なら tsumugi・SheetSage2 を実行）
+
+    chords: 手で直したコード (秒, コード名)。与えると MIDI のコードの代わりに使う"""
     opt = options or Options()
     audio = Path(audio)
     if midi is None:
@@ -55,7 +62,7 @@ def prepare(audio: str | Path, midi: str | Path | None = None, options: Options 
     if "sheetsage" in (opt.melody, opt.beats):
         run_sheetsage(audio, opt.cache_dir, opt.sheetsage_model)
     beats = sheetsage_beats(audio, opt.cache_dir) if opt.beats == "sheetsage" else None
-    tl = load_timeline(str(midi), beats=beats)
+    tl = load_timeline(str(midi), beats=beats, chords=chords)
     for m in tl.repairs:
         log.info("[テンポ] %s", m)
     return tl, melody_notes(tl, opt.melody, audio, opt.cache_dir)
@@ -78,16 +85,30 @@ def transcribe(
     audio = Path(audio)
     midi = Path(midi) if midi is not None else make_midi(audio, opt)
     tl, notes = prepare(audio, midi, opt)
-    alignment = None
-    if lyrics:
-        vocals = separate_vocals(audio, opt.cache_dir)
-        E = ctc_emissions(vocals, cache=Path(opt.cache_dir) / "ctc" / f"{audio.stem}.npy")
-        note_times = grid_times = None
-        if opt.melody_prior:
-            note_times = np.array(sorted(float(tl.beat2sec(n.on)) for n in notes))
-            grid_times = np.array([float(tl.beat2sec(b)) for b in np.arange(0, len(tl.beat_times) - 1, 0.5)])
-        alignment = align_lyrics(lyrics, E, load_vocab(), vocal_rms_db(vocals), note_times, grid_times)
+    alignment = align_audio(audio, lyrics, tl, notes, opt) if lyrics else None
     return Result(render_chordpro(tl, alignment, notes, info, opt), alignment, tl, midi)
+
+
+def ctc_path(audio: str | Path, options: Options | None = None) -> Path:
+    return Path((options or Options()).cache_dir) / "ctc" / f"{Path(audio).stem}.npy"
+
+
+def vocal_features(audio: str | Path, options: Options | None = None) -> tuple[Path, np.ndarray]:
+    """ボーカル分離（WAV のパス）と CTC の事後確率（cache_dir にキャッシュ）"""
+    opt = options or Options()
+    vocals = separate_vocals(audio, opt.cache_dir)
+    return vocals, ctc_emissions(vocals, cache=ctc_path(audio, opt))
+
+
+def align_audio(audio: str | Path, lyrics: str, tl: Timeline, notes, options: Options | None = None) -> Alignment:
+    """歌詞を歌声に合わせる（モーラごとの発声時刻）"""
+    opt = options or Options()
+    vocals, E = vocal_features(audio, opt)
+    note_times = grid_times = None
+    if opt.melody_prior:
+        note_times = np.array(sorted(float(tl.beat2sec(n.on)) for n in notes))
+        grid_times = np.array([float(tl.beat2sec(b)) for b in np.arange(0, len(tl.beat_times) - 1, 0.5)])
+    return align_lyrics(lyrics, E, load_vocab(), vocal_rms_db(vocals), note_times, grid_times)
 
 
 def render_chordpro(
