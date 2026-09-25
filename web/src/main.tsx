@@ -19,6 +19,11 @@ function Layout() {
         </Link>
       </header>
       <Outlet />
+      <footer className="app-footer">
+        <a href="/THIRD_PARTY_NOTICES.txt" target="_blank" rel="noreferrer">
+          サードパーティのライセンス
+        </a>
+      </footer>
     </>
   );
 }

@@ -122,6 +122,17 @@ button:focus-visible,
   gap: 24px;
 }
 
+.app-footer {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px 24px;
+  font-size: 12px;
+}
+
+.app-footer a {
+  color: var(--muted);
+}
+
 .page-banner {
   max-width: 1080px;
   margin: 16px auto 0;
