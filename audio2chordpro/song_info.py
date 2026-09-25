@@ -69,7 +69,7 @@ def from_audio(path: str | Path) -> AudioMeta:
 _ID3 = {"title": "TIT2", "artist": "TPE1", "lyricist": "TEXT", "composer": "TCOM", "arranger": "TPE4"}
 _MP4 = {"title": "©nam", "artist": "©ART", "composer": "©wrt"}
 _LRC_TIME = re.compile(r"^(?:\[\d+:\d+(?:[.:]\d+)?\])+")
-_LRC_TAG = re.compile(r"^\[[a-z]+:.*\]$", re.I)
+_LRC_TAG = re.compile(r"^\[[a-z]+:.*\]$", re.IGNORECASE)
 
 
 def read_tags(path: str | Path) -> tuple[dict[str, str], str]:
@@ -115,7 +115,8 @@ def clean_lyrics(text: str) -> str:
 # ファイル名の飾り：【MV】・[Official]・(Official Video) などと、先頭のトラック番号
 _BRACKETS = re.compile(r"【[^】]*】|\[[^\]]*\]")
 _NOISE = re.compile(
-    r"[(（][^()（）]*(?:official|music|lyrics?|video|audio|mv|pv|full|hd|4k|歌詞|公式|フル)[^()（）]*[)）]", re.I
+    r"[(（][^()（）]*(?:official|music|lyrics?|video|audio|mv|pv|full|hd|4k|歌詞|公式|フル)[^()（）]*[)）]",
+    re.IGNORECASE,
 )
 _TRACK_NO = re.compile(r"^\d{1,3}(?:\s*[.\-_]\s*|\s+)")
 _QUOTED = re.compile(r"[「『](.+?)[」』]")

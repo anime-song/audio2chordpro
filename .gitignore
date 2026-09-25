@@ -20,6 +20,7 @@ Thumbs.db
 
 # 中間結果・出力
 cache/
+projects/
 *.cho
 *.align.json
 

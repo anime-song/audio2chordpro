@@ -103,6 +103,7 @@ uv run audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho --save-midi song.
 | `--head-outside` | `false` | 行頭コードを括弧の外側に配置（デフォルトは `（[C]はい）`） |
 | `--no-tail-grid` | `false` | 行末以降・行中のコード小節グリッド展開を無効化 |
 | `--save-midi` | – | tsumugi で作った MIDI をコピーする先 |
+| `--models-dir` | `--cache-dir` | tsumugi のソース・チェックポイントの置き場（曲ごとに `--cache-dir` を分けても共有できる） |
 
 ### Python API
 
@@ -125,6 +126,45 @@ alignment_dict = result.alignment.to_dict()
 ```
 
 アライメント修正後の再レンダリングには `prepare()` と `render_chordpro()` を使用します。
+手で直したコードは `prepare(..., chords=[(秒, コード名), ...])` で MIDI のコードの代わりに使えます。
+
+### プロジェクト（段階ごとに実行・途中からやり直し）
+
+1曲を1つのフォルダにまとめ、段階ごとの結果を保存します。歌詞や設定を変えたときは、影響する段階だけをやり直します（UI からの利用を想定）。
+重い解析（tsumugi・SheetSage2・ボーカル分離）は音源だけで進むので、歌詞を選ぶ前に始めておけます。
+
+```python
+from audio2chordpro import Project
+
+p = Project.create("projects", "歌手 - 曲名.mp3")  # タグ（曲名・歌手・作詞・作曲・歌詞）、無ければファイル名から曲情報を入れる
+p.run("analysis")                                  # tsumugi → SheetSage2 → ボーカル分離・CTC
+hits = p.search_lyrics()                           # 曲情報で歌詞サイトを検索
+p.use_lyrics(hits[0])                              # 歌詞を使い、空いている曲情報も埋める
+p.run()                                            # アライメント → ChordPro（まだの段階・古くなった段階だけ）
+print(p.chordpro())
+
+p.set_options(simplify=True)                       # 書式を変えたら ChordPro だけやり直す
+p.status()                                         # {"midi": "done", "melody": "done", "vocals": "done", "align": "done", "render": "stale"}
+```
+
+手元の MIDI を使うときは `p.set_midi("song.mid")`、歌詞を直接入れるときは `p.set_lyrics(text)` を使います。
+コードの手直しは `p.save_chords([(秒, コード名), ...])`（元は `p.midi_chords()`、MIDI への書き出しは `p.export_midi()`）、
+アライメントの手直しは `p.save_alignment(alignment)` で保存します。手直ししたアライメントは、そのあと歌詞を変えると使われなくなります。
+
+```
+projects/<曲名>/
+  project.json         設定・各段階を実行したときの入力の指紋・手直しの記録
+  song.json            曲情報と各項目の出所（tag / filename / site:<サイト> / manual）
+  audio/<元のファイル名>
+  lyrics.txt           使う歌詞（lyrics.source.json に出所）
+  midi/amt.mid         AMT の MIDI（書き換えない）
+  edits/chords.json    手で直したコード
+  alignment.auto.json  自動のアライメント（手で直したものは alignment.json）
+  output/<曲名>.cho
+  work/                tsumugi・ボーカル分離・CTC・SheetSage2 の出力（消しても作り直せる）
+```
+
+tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`Project.create(..., models_dir=...)` で変更可）に置きます。
 
 ### 歌詞サイトから歌詞を取得
 
@@ -175,13 +215,14 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 
 - **MIDI プロバイダ (`providers.MidiProvider`)**: 音源から AMT MIDI を自動生成する。[tsumugi](https://github.com/anime-song/tsumugi) による実装が `providers.midi.TsumugiMidiProvider`
 - **歌詞プロバイダ (`providers.LyricsProvider`)**: 楽曲メタデータからの歌詞自動取得。歌詞サイトによる実装が `providers.lyrics.SiteLyricsProvider`。サイトを増やすときは `providers/lyrics/` に `LyricsSite` のサブクラス（`search_url` / `parse_search` / `parse_song`）を足して `SITES` に登録する
-- **UI / 手動補正**: `Alignment` オブジェクトの JSON 出力（`to_dict` / `from_dict`）を介して、外部エディタでの修正・再レンダリングが可能
+- **UI / 手動補正**: `Project` の段階・状態（`run` / `status`）と手直しの保存（`save_chords` / `save_alignment`）。`Alignment` は JSON（`to_dict` / `from_dict`）でやり取りできる
 
 ## モジュール構成
 
 | モジュール | 役割 |
 |---|---|
-| `audio2chordpro/pipeline.py` | 統合パイプライン制御（`transcribe`, `prepare`, `render_chordpro`） |
+| `audio2chordpro/pipeline.py` | 統合パイプライン制御（`transcribe`, `prepare`, `align_audio`, `render_chordpro`） |
+| `audio2chordpro/project.py` | 1曲1フォルダのプロジェクト：段階ごとの保存・やり直し・手直し |
 | `audio2chordpro/timeline.py` | MIDI テンポマップの拍単位正規化・補正 |
 | `audio2chordpro/chords.py` | コードネームおよび調の解析・調号に応じた表記統一 |
 | `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表層文字列との対応付け |
@@ -189,11 +230,11 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/align.py` | 歌メロ事前分布に基づくラティス強制アライメント |
 | `audio2chordpro/melody.py` | 歌メロノート抽出（MIDI / SheetSage2 ラッパー） |
 | `audio2chordpro/render.py` | モーラ・ノート対応付け、音節グリッド配置、ChordPro 文字列生成 |
-| `audio2chordpro/song_info.py` | 楽曲メタデータとディレクティブ生成 |
+| `audio2chordpro/song_info.py` | 楽曲メタデータ（音源のタグ・ファイル名から読む）とディレクティブ生成 |
 | `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
 | `audio2chordpro/providers/midi/` | 音源からの MIDI 生成（`tsumugi.py`） |
 | `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
-| `tests/` | パーサのテスト（`uv run pytest`、ネットにはつながない） |
+| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクトのテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない） |
 
 ## クレジット・ライセンス
 

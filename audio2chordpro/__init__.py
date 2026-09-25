@@ -2,12 +2,14 @@
 
 from .align import Alignment, align_lyrics
 from .pipeline import Options, Result, prepare, render_chordpro, transcribe
+from .project import Project
 from .render import RenderOptions
 from .song_info import SongInfo
 
 __all__ = [
     "Alignment",
     "Options",
+    "Project",
     "RenderOptions",
     "Result",
     "SongInfo",
