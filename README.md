@@ -166,6 +166,25 @@ projects/<曲名>/
 
 tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`Project.create(..., models_dir=...)` で変更可）に置きます。
 
+### UI のサーバ（作成中）
+
+```bash
+uv run audio2chordpro serve            # http://127.0.0.1:8000（プロジェクトは ./projects。--root で変更）
+```
+
+画面はまだありません（`/` は API の説明 `/docs` に移ります）。API は FastAPI で、中身は上のプロジェクトです。
+音源をアップロードすると解析（tsumugi・SheetSage2・ボーカル分離）がすぐ裏で始まり、その間に曲情報・歌詞を決められます。
+重い段階は1本の列（ジョブ）で順に実行し、`GET /api/jobs/{id}` で実行中の段階・終わった段階・ログが分かります。
+
+| API | 内容 |
+|---|---|
+| `GET/POST /api/projects` | プロジェクトの一覧・音源のアップロード（`analyze` で解析も始める） |
+| `GET/DELETE /api/projects/{id}` | プロジェクト（曲情報・歌詞・設定・各段階の状態・ジョブ） |
+| `PATCH /api/projects/{id}/info`・`/options` | 曲情報・設定を変える |
+| `PUT /api/projects/{id}/lyrics`、`GET …/lyrics/search`、`POST …/lyrics/use` | 歌詞を入れる・歌詞サイトで検索して使う |
+| `POST /api/projects/{id}/run` | 段階を実行する（ジョブ）。`GET/DELETE /api/jobs/{id}` で状態・取り消し |
+| `GET …/chordpro`・`…/audio`・`…/midi`、`PUT …/midi` | ChordPro・音源・MIDI の取得、手元の MIDI を使う |
+
 ### 歌詞サイトから歌詞を取得
 
 曲名で歌詞サイトを検索し、候補から選んだ曲の歌詞とメタデータ（歌手・作詞・作曲・編曲）を取得できます。
@@ -223,6 +242,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 |---|---|
 | `audio2chordpro/pipeline.py` | 統合パイプライン制御（`transcribe`, `prepare`, `align_audio`, `render_chordpro`） |
 | `audio2chordpro/project.py` | 1曲1フォルダのプロジェクト：段階ごとの保存・やり直し・手直し |
+| `audio2chordpro/server/` | UI のサーバ：API（`app.py`）、段階を1本の列で順に実行するジョブ（`jobs.py`） |
 | `audio2chordpro/timeline.py` | MIDI テンポマップの拍単位正規化・補正 |
 | `audio2chordpro/chords.py` | コードネームおよび調の解析・調号に応じた表記統一 |
 | `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表層文字列との対応付け |
@@ -234,7 +254,7 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 | `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
 | `audio2chordpro/providers/midi/` | 音源からの MIDI 生成（`tsumugi.py`） |
 | `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
-| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクトのテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない） |
+| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクト・API のテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない） |
 
 ## クレジット・ライセンス
 

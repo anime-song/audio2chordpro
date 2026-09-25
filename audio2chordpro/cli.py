@@ -4,6 +4,7 @@ python -m audio2chordpro song.mp3 --midi song.mid --lyrics lyrics.txt -o song.ch
 python -m audio2chordpro song.mp3 --midi song.mid -o chords.cho                  # 歌詞なし（コード譜だけ）
 python -m audio2chordpro song.mp3 --midi song.mid --alignment song.align.json -o song.cho   # 保存したアライメントから再出力
 python -m audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho                  # MIDI なし（tsumugi で作る）
+python -m audio2chordpro serve                                                      # UI のサーバ（audio2chordpro.server）
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ from .song_info import SongInfo
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="audio2chordpro", description="音源 + AMT の MIDI（省略時は tsumugi で作る）+ 歌詞 → ChordPro")
+    ap = argparse.ArgumentParser(
+        prog="audio2chordpro", description="音源 + AMT の MIDI（省略時は tsumugi で作る）+ 歌詞 → ChordPro"
+    )
     ap.add_argument("audio", type=Path, help="音源（mp3 / wav）")
     ap.add_argument("--midi", type=Path, help="AMT の MIDI（コード・調・拍・歌メロ）。省略時は tsumugi で作る")
     ap.add_argument("--lyrics", type=Path, help="歌詞のテキストファイル（UTF-8、空行 = 段落）")
@@ -64,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> None:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["serve"]:
+        from .server import main as serve
+
+        return serve(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     info = SongInfo(args.title, args.artist, args.lyricist, args.composer, args.arranger)

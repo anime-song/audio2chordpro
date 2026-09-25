@@ -34,6 +34,10 @@ dependencies = [
     "chord-romanizer",
     "torchcodec<0.8",  # stem-splitter が必要とする。torch 2.8 に合う版（WAV の保存は soundfile に替えている）
     "mutagen",  # 音源のタグ（曲名・歌手・歌詞）
+    # UI のサーバ（audio2chordpro serve）
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
 ]
 
 [project.scripts]
@@ -64,4 +68,4 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "httpx2"]  # httpx2: FastAPI の TestClient
