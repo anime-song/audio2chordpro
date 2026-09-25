@@ -66,7 +66,8 @@ uv sync
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anime-song/audio2chordpro/blob/main/notebooks/audio2chordpro_colab.ipynb)
 
-GPU ランタイムを選択して順次実行することで、ブラウザ上で ChordPro を生成・ダウンロードできます。
+GPU ランタイムを選び、セルを1つ実行して出てくる「audio2chordpro を開く」から、下の UI を使えます（初回はインストールに数分）。
+プロジェクトは Google ドライブ（`MyDrive/audio2chordpro`）に保存でき、次回も続きから使えます。
 
 ### CLI
 
@@ -169,9 +170,12 @@ tsumugi のソース・チェックポイントは全曲で共有する `~/.cach
 ### UI（ブラウザの画面）
 
 ```bash
-cd web && npm install && npm run build && cd ..   # 画面をビルドする（Node.js が必要。初回と web/ を変えたとき）
-uv run audio2chordpro serve                       # http://127.0.0.1:8000 が開く（プロジェクトは ./projects。--root で変更）
+uv run audio2chordpro serve     # http://127.0.0.1:8000 が開く（プロジェクトは ./projects。--root で変更）
 ```
+
+画面（`web/` のビルド）は、無ければ GitHub の Release「web-latest」からビルド済みのものを自動で取ってきます（Node.js は要りません）。
+Release の画面は、main の `web/` が変わるたびに GitHub Actions（`.github/workflows/web.yml`）がビルドして置きます。
+手元の `web/` を使うときは `cd web && npm install && npm run build`（`audio2chordpro/server/static` に書き出す）。
 
 手順は ① 音源を入れる → ② 曲情報・歌詞 → ③ 作成 → ④ コード譜（プレビュー・書式・ダウンロード）です。
 音源を入れると解析（tsumugi・SheetSage2・ボーカル分離）がすぐ裏で始まり、その間に曲情報を確かめ、歌詞を歌詞サイトから選ぶか貼り付けられます。
@@ -181,6 +185,7 @@ uv run audio2chordpro serve                       # http://127.0.0.1:8000 が開
 API を変えたら `npm run gen:api` で画面側の型（`web/src/api/schema.ts`）を作り直します。
 
 画面は FastAPI の API（`audio2chordpro/server/app.py`、説明は `/docs`）を使っています。中身は上のプロジェクトです。
+画面に含まれるライブラリ（React など、すべて MIT）のライセンス文は、ビルド時に `THIRD_PARTY_NOTICES.txt` にまとめ、画面の下のリンクから見られます。
 
 | API | 内容 |
 |---|---|
@@ -269,4 +274,5 @@ J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置
 - **CTC 音響モデル**: [reazon-research/japanese-wav2vec2-base-rs35kh](https://huggingface.co/reazon-research/japanese-wav2vec2-base-rs35kh) (Apache-2.0)
 - **歌メロ採譜モデル**: [SheetSage2](https://huggingface.co/m-a-p/SheetSage2) (CC BY-NC 4.0)
 - **AMT（MIDI の自動生成）**: [tsumugi](https://github.com/anime-song/tsumugi) (MIT)。ステム分離に [stem-splitter](https://pypi.org/project/stem-splitter/)
+- **UI の画面**: [React](https://react.dev/)、[React Router](https://reactrouter.com/)、[TanStack Query](https://tanstack.com/query)、[openapi-fetch](https://openapi-ts.dev/openapi-fetch/)（いずれも MIT。ライセンス文は `THIRD_PARTY_NOTICES.txt`）
 - **要素技術・ライブラリ**: [Demucs](https://github.com/facebookresearch/demucs), [pyopenjtalk-plus](https://github.com/tsukumijima/pyopenjtalk-plus), [alkana](https://github.com/cod-sushi/alkana.py)

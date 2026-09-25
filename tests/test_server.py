@@ -167,3 +167,30 @@ def test_project_found_while_tsumugi_changes_the_cwd(tmp_path, song, calls, monk
         assert _wait(client, job["id"])["state"] == "done"
     assert seen == [200]
     assert (tmp_path / "projects" / pid / "midi" / "amt.mid").exists()
+
+
+def test_download_web(tmp_path):
+    """ビルド済みの画面の zip を取ってきて入れ替える（file:// の URL で試す）"""
+    import zipfile
+
+    from audio2chordpro.server.web import download_web, ensure_web, has_web
+
+    good, bad = tmp_path / "web-dist.zip", tmp_path / "bad.zip"
+    with zipfile.ZipFile(good, "w") as z:
+        z.writestr("index.html", "<div id=root></div>")
+        z.writestr("assets/app.js", "console.log(1)")
+        z.writestr("THIRD_PARTY_NOTICES.txt", "react 19")
+    with zipfile.ZipFile(bad, "w") as z:
+        z.writestr("readme.txt", "x")
+    dest = tmp_path / "server" / "static"
+    dest.mkdir(parents=True)
+    (dest / "old.js").write_text("old", encoding="utf-8")
+
+    assert not has_web(dest)
+    assert ensure_web(good.as_uri(), dest)
+    assert (dest / "assets" / "app.js").is_file() and not (dest / "old.js").exists()
+    assert ensure_web(bad.as_uri(), dest)  # あれば取りに行かない
+    with pytest.raises(ValueError):
+        download_web(bad.as_uri(), dest)
+    assert has_web(dest)  # 失敗しても前のものは残る
+    assert not ensure_web((tmp_path / "none.zip").as_uri(), tmp_path / "other")

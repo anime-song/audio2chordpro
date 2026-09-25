@@ -24,9 +24,9 @@ from pydantic import BaseModel
 
 from ..project import Project, projects
 from .jobs import Runner
+from .web import STATIC_DIR
 
 AUDIO_EXTS = (".mp3", ".wav", ".flac", ".m4a", ".ogg")
-STATIC_DIR = Path(__file__).parent / "static"
 
 StageName = Literal["midi", "melody", "vocals", "align", "render"]
 StageState = Literal["done", "stale", "pending", "skipped"]
