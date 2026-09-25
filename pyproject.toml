@@ -33,6 +33,7 @@ dependencies = [
     "stem-splitter",
     "chord-romanizer",
     "torchcodec<0.8",  # stem-splitter が必要とする。torch 2.8 に合う版（WAV の保存は soundfile に替えている）
+    "mutagen",  # 音源のタグ（曲名・歌手・歌詞）
 ]
 
 [project.scripts]
