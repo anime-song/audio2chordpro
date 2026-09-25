@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LyricsHit, ProjectDetail, SongInfo } from "../api/client";
 import { useRun, useSearchLyrics, useSetLyrics, useUpdateInfo, useUseLyrics } from "../api/hooks";
 import { Card, ErrorText, Spinner } from "../components/ui";
-import { siteLabel, sourceLabel } from "../lib/project";
+import { buildJob, siteLabel, sourceLabel } from "../lib/project";
 
 const FIELDS: { key: keyof SongInfo; label: string }[] = [
   { key: "title", label: "曲名" },
@@ -28,9 +28,12 @@ export function LyricsStep({ project, onBuild }: { project: ProjectDetail; onBui
     }
   }, [project.lyrics]);
 
+  // 作成のジョブがもう待っている・動いているなら、もう一度は出さずに ② を見せる
+  // （歌詞を直していれば保存する。アライメントがまだならその歌詞で、済んでいれば後で「やり直しが必要」になる）
+  const building = Boolean(buildJob(project));
   const build = async () => {
     if (dirty) await saveLyrics.mutateAsync(lyrics);
-    await run.mutateAsync({ stages: [] });
+    if (!building) await run.mutateAsync({ stages: [] });
     onBuild();
   };
 
@@ -67,7 +70,14 @@ export function LyricsStep({ project, onBuild }: { project: ProjectDetail; onBui
       <div className="step-footer">
         <ErrorText error={run.error} />
         <button className="button primary" disabled={saveLyrics.isPending || run.isPending} onClick={build}>
-          {lyrics.trim() ? "この歌詞でコード譜を作る" : "歌詞なしでコード譜を作る"} →
+          {building
+            ? dirty
+              ? "歌詞を保存して作成を見る"
+              : "作成中です。進み具合を見る"
+            : lyrics.trim()
+              ? "この歌詞でコード譜を作る"
+              : "歌詞なしでコード譜を作る"}{" "}
+          →
         </button>
       </div>
     </div>

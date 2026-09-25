@@ -94,6 +94,8 @@ def test_flow(client, song, calls, monkeypatch):
 
     client.delete(f"/api/projects/{pid}")
     assert client.get("/api/projects").json() == []
+    # 同じ音源で作り直しても、消す前のジョブは出ない
+    assert _upload(client, song)["jobs"] == []
 
 
 def test_errors(client, song, calls):

@@ -38,6 +38,12 @@ export function activeJob(p: ProjectDetail): Job | undefined {
   return p.jobs.find((j) => j.state === "running") ?? p.jobs.find((j) => j.state === "queued");
 }
 
+/** 待っている・実行中の「作成」のジョブ（音源の解析だけのジョブは除く） */
+export function buildJob(p: ProjectDetail): Job | undefined {
+  const active = p.jobs.filter((j) => j.state === "running" || j.state === "queued");
+  return active.find((j) => !(j.stages.length === 1 && j.stages[0] === "analysis"));
+}
+
 export function stageState(p: ProjectSummary, stage: Stage): StageState {
   return (p.status[stage] ?? "pending") as StageState;
 }

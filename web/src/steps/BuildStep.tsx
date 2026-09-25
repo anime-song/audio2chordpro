@@ -3,12 +3,13 @@ import { useEffect, useRef } from "react";
 import { type Job, type ProjectDetail, STAGES } from "../api/client";
 import { useCancelJob, useRun, useUpdateOptions, useUploadMidi } from "../api/hooks";
 import { Card, Dropzone, ErrorText, StateBadge } from "../components/ui";
-import { activeJob, isFinished, STAGE_LABELS, stageState, stageView } from "../lib/project";
+import { activeJob, buildJob, isFinished, STAGE_LABELS, stageState, stageView } from "../lib/project";
 
 export function BuildStep({ project: p, onDone }: { project: ProjectDetail; onDone: () => void }) {
   const run = useRun(p.id);
   const job = activeJob(p) ?? p.jobs[0];
   const allDone = STAGES.every((s) => isFinished(stageState(p, s)));
+  const building = Boolean(buildJob(p)); // 音源の解析中でも作成は頼める（解析の後ろで待つ）
 
   // ChordPro が書き直され、ジョブがすべて終わったら ③ へ
   const version = useRef(p.output_version);
@@ -24,10 +25,10 @@ export function BuildStep({ project: p, onDone }: { project: ProjectDetail; onDo
         actions={
           <button
             className="button primary"
-            disabled={p.busy || allDone || run.isPending}
+            disabled={building || allDone || run.isPending}
             onClick={() => run.mutate({ stages: [] })}
           >
-            {allDone ? "すべて済み" : "作成する"}
+            {building ? "作成中…" : allDone ? "すべて済み" : "作成する"}
           </button>
         }
       >

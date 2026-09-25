@@ -242,6 +242,7 @@ def create_app(root: str | Path = "projects", models_dir: str | Path | None = No
         p = open_project(pid)
         idle(pid)
         shutil.rmtree(p.dir)
+        runner.forget(pid)
 
     @app.patch("/api/projects/{pid}/info", response_model=ProjectDetail)
     def update_info(pid: str, body: InfoPatch):

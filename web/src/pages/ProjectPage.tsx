@@ -4,7 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { ANALYSIS, ApiError, fileUrl, type ProjectDetail, STAGES } from "../api/client";
 import { useProject } from "../api/hooks";
 import { ErrorText, Spinner } from "../components/ui";
-import { activeJob, isFinished, STAGE_LABELS, stageState, stageView } from "../lib/project";
+import { buildJob, isFinished, STAGE_LABELS, stageState, stageView } from "../lib/project";
 import { BuildStep } from "../steps/BuildStep";
 import { LyricsStep } from "../steps/LyricsStep";
 import { ResultStep } from "../steps/ResultStep";
@@ -40,10 +40,10 @@ export function ProjectPage() {
   );
 }
 
+/** URL に手順が無いとき（一覧から開いたとき）に出す手順 */
 function firstStep(p: ProjectDetail): StepKey {
+  if (buildJob(p)) return "build"; // 作成を始めている（解析のジョブの後ろで待っていても）
   if (p.output) return "result";
-  const job = activeJob(p);
-  if (job && !(job.stages.length === 1 && job.stages[0] === "analysis")) return "build";
   return "lyrics";
 }
 

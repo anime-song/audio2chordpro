@@ -126,6 +126,12 @@ class Runner:
             jobs = [j for j in self._jobs.values() if project is None or j.project == project]
         return jobs[::-1]
 
+    def forget(self, project: str) -> None:
+        """終わったジョブを忘れる（プロジェクトを消したとき。同じ名前で作り直したプロジェクトに出さない）"""
+        with self._lock:
+            for jid in [j.id for j in self._jobs.values() if j.project == project and not j.active]:
+                del self._jobs[jid]
+
     def busy(self, project: str) -> bool:
         return any(j.active for j in self.jobs(project))
 
