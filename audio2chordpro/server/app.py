@@ -148,8 +148,10 @@ class RunIn(BaseModel):
 
 # ================================================================== アプリ
 def create_app(root: str | Path = "projects", models_dir: str | Path | None = None) -> FastAPI:
-    root = Path(root)
+    # 絶対パスにしておく（tsumugi の実行中はプロセスのカレントフォルダが変わる）
+    root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    models_dir = Path(models_dir).resolve() if models_dir else None
 
     def open_project(pid: str) -> Project:
         d = root / pid

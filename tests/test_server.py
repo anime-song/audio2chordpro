@@ -142,3 +142,28 @@ def test_web(tmp_path, monkeypatch, calls):
         assert c.get("/assets/app.js").text == "console.log(1)"
         assert "secret" not in c.get("/assets/..%2F..%2Fsecret.txt").text
         assert c.get("/api/nothing").status_code == 404
+
+
+def test_project_found_while_tsumugi_changes_the_cwd(tmp_path, song, calls, monkeypatch):
+    """tsumugi は実行中にカレントフォルダを移す。その間も（相対パスで渡した）プロジェクトを開ける"""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    seen = []
+
+    def like_tsumugi():
+        old = os.getcwd()
+        os.chdir(tmp_path / "elsewhere")
+        try:
+            seen.append(client.get(f"/api/projects/{pid}").status_code)
+        finally:
+            os.chdir(old)
+
+    calls["midi_hook"] = like_tsumugi
+    with TestClient(create_app("projects", "models")) as client:
+        pid = _upload(client, song)["id"]
+        job = client.post(f"/api/projects/{pid}/run", json={"stages": ["midi"]}).json()
+        assert _wait(client, job["id"])["state"] == "done"
+    assert seen == [200]
+    assert (tmp_path / "projects" / pid / "midi" / "amt.mid").exists()

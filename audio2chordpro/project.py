@@ -58,8 +58,10 @@ class Project:
     段階を実行している間（別のスレッド）に UI から設定・曲情報を変えても、どちらの書き込みも消えない"""
 
     def __init__(self, path: str | Path, models_dir: str | Path | None = None):
-        self.dir = Path(path)
-        self.models_dir = Path(models_dir) if models_dir else DEFAULT_MODELS_DIR
+        # 絶対パスにしておく。tsumugi は実行中にプロセスのカレントフォルダを移す（os.chdir）ので、
+        # 相対パスのままだと、その間に別のスレッド（UI）から開いたときに見つからない
+        self.dir = Path(path).resolve()
+        self.models_dir = Path(models_dir).resolve() if models_dir else DEFAULT_MODELS_DIR
         if not (self.dir / "project.json").exists():
             raise FileNotFoundError(f"プロジェクトではありません: {self.dir}")
 
@@ -80,13 +82,13 @@ class Project:
     @classmethod
     def create(cls, root: str | Path, audio: str | Path, models_dir: str | Path | None = None) -> Project:
         """音源からプロジェクトを作る。同じ音源のプロジェクトが root にあればそれを開く"""
-        audio = Path(audio)
+        audio, root = Path(audio).resolve(), Path(root).resolve()
         sha = _file_sha1(audio)
         for p in projects(root, models_dir):
             if p.data.get("audio_sha1") == sha:
                 return p
         meta = from_audio(audio)
-        d = _unique_dir(Path(root), _safe_name(meta.info.title or audio.stem))
+        d = _unique_dir(root, _safe_name(meta.info.title or audio.stem))
         (d / "audio").mkdir(parents=True)
         shutil.copy2(audio, d / "audio" / audio.name)
         _write_json(
@@ -461,7 +463,7 @@ class Project:
 
 def projects(root: str | Path, models_dir: str | Path | None = None) -> list[Project]:
     """root にあるプロジェクト（新しい順）"""
-    root = Path(root)
+    root = Path(root).resolve()
     found = [Project(d, models_dir) for d in root.iterdir() if (d / "project.json").exists()] if root.is_dir() else []
     return sorted(found, key=lambda p: p.data.get("created", ""), reverse=True)
 

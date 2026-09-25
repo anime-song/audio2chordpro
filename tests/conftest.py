@@ -32,11 +32,14 @@ def song(tmp_path):
 @pytest.fixture
 def calls(monkeypatch, song):
     """重い処理（tsumugi・SheetSage2・ボーカル分離・アライメント）を置き換えて、呼ばれた回数を数える。
-    calls["hook"] に関数を入れると、ボーカル分離の途中で呼ぶ（実行中に別の操作が入る場面）"""
-    n = {"midi": 0, "melody": 0, "vocals": 0, "align": 0, "hook": None}
+    calls["hook"] に関数を入れると、ボーカル分離の途中で呼ぶ（実行中に別の操作が入る場面）。
+    calls["midi_hook"] は tsumugi の途中で呼ぶ"""
+    n = {"midi": 0, "melody": 0, "vocals": 0, "align": 0, "hook": None, "midi_hook": None}
 
     def make_midi(audio, opt):
         n["midi"] += 1
+        if n["midi_hook"]:
+            n["midi_hook"]()
         return song[1]
 
     def run_sheetsage(audio, cache_dir, model):  # 歌メロ（ノートの無い MIDI）を置く

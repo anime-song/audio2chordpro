@@ -15,7 +15,8 @@ export function ProjectPage() {
   const { id = "" } = useParams();
   const project = useProject(id);
   if (project.isPending) return <main className="page muted">読み込んでいます…</main>;
-  if (project.error) {
+  // 読み直しに失敗しただけなら、前に読めた内容を出したまま知らせる（次の読み直しで戻る）
+  if (!project.data) {
     return (
       <main className="page">
         <Link to="/">← プロジェクト一覧</Link>
@@ -27,7 +28,16 @@ export function ProjectPage() {
       </main>
     );
   }
-  return <ProjectView key={id} project={project.data} />;
+  return (
+    <>
+      {project.error && (
+        <div className="page-banner" role="alert">
+          サーバから読み直せませんでした：{project.error.message}
+        </div>
+      )}
+      <ProjectView key={id} project={project.data} />
+    </>
+  );
 }
 
 function firstStep(p: ProjectDetail): StepKey {

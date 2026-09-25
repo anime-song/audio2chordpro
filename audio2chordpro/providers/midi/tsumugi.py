@@ -27,7 +27,8 @@ COMMIT = "020edc1be0fd8459f26a415dc171e1c2fe0a0150"  # 動作を確認したコ�
 
 @contextlib.contextmanager
 def _chdir(path: Path):
-    """tsumugi はチェックポイントを実行時のフォルダの checkpoints/ などに置くので、その間だけ移る"""
+    """tsumugi はチェックポイントを実行時のフォルダの checkpoints/ などに置くので、その間だけ移る。
+    カレントフォルダはプロセス全体のものなので、その間はほかのスレッドの相対パスがずれる（呼ぶ側は絶対パスで持つ）"""
     old = Path.cwd()
     os.chdir(path)
     try:

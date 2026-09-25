@@ -122,6 +122,16 @@ button:focus-visible,
   gap: 24px;
 }
 
+.page-banner {
+  max-width: 1080px;
+  margin: 16px auto 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+}
+
 .muted {
   color: var(--muted);
 }
