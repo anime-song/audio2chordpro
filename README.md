@@ -14,100 +14,129 @@
 [F]---[G]- ----|
 ```
 
-## パイプライン
+Web ブラウザの UI、Google Colab、コマンドライン（CLI）、Python API から利用できます。MIDI が手元にない場合でも、音源から自動でビート・コード・歌メロを推定して作成できます。
 
-```
-音源 ─┬─ ボーカル分離（Demucs）─ CTC（wav2vec2）─┐
-      │                                             ├─ 強制アライメント ─ モーラごとの発声時刻
-歌詞 ─┴─ 読み・モーラ解析（pyopenjtalk + 辞書）───┘        ↑
-                                                            │（歌メロ開始時刻を事前分布として付与）
-AMT MIDI ── 拍タイムライン（テンポ補正・コード表記）───────┤
-SheetSage2 ─ 歌メロノート ─────────────────────────────────┘
-                                    ↓
-        モーラと歌メロのDP対応付け → 8分音符グリッド整音 → コード配置 → ChordPro 出力
-```
+---
 
-1. **拍タイムライン (`timeline.py`)**: AMT テンポマップを拍単位に正規化。倍テンポ・半テンポ、冒頭の異常テンポ、位相ズレ（1拍未満の小節）を補正。コード名の綴り（F#7/A# か Gb7/Bb か）は MIDI に書いてあるとおりにする（tsumugi が前後の文脈から決めている）。
-2. **読み解析 (`lyrics.py`)**: pyopenjtalk による形態素・読み解析。英単語辞書参照、数字の読み分け（数値読み／1文字読み）、漢字連続の単字分割（コード挿入用）に対応。
-3. **強制アライメント (`align.py`)**: wav2vec2 CTC モデル（漢字かな・サブワード混在）に対応したラティス探索。歌メロの発音開始時刻にボーナスを付与して精度を向上。
-4. **コード配置 (`render.py`)**: モーラと歌メロノートを DP（動的計画法）でアライメントし、8分音符グリッドに量子化。各コード変化点に最も近い音節の先頭（±8分音符以内）にコードを配置。
+## 主な特徴
 
-## 入力要件
+- **歌詞とコードの自動配置**: ボーカル音声の強制アライメントと歌メロ採譜を組み合わせ、発声タイミングに合わせて歌詞の上にコードを配置。
+- **歌本・実用向け記譜**:
+  - 8分音符グリッドによるシンコペーションの反映
+  - 漢字の途中でコードが変わる場合の自動ルビ展開（例: `言葉(こと[G]ば)`）
+  - 前奏・間奏・後奏の小節グリッド展開（例: `[C]---- ----|[F]---- [G]----|`）
+  - 通常のコード名表記に加え、ディグリー表記（`VIm7` や `IV/V` など。`chord-romanizer` 連携）にも対応
+- **Web UI & 段階的編集**: ブラウザ上で音源投入から歌詞検索、手動でのコード・アライメント調整、プレビュー、エクスポートまで完結。
+- **差分キャッシュ設計**: 1曲1フォルダのプロジェクト形式。歌詞や書式を変更した際も、重い音響解析はスキップして必要な処理だけを再実行。
 
-- **音源**: MP3 / WAV
-- **AMT MIDI**（省略可。省略時は [tsumugi](https://github.com/anime-song/tsumugi) で音源から作る）: 以下のトラックを含む標準 MIDI ファイル
-  - `Predicted Tempo Map`: テンポ、拍子、調（key_signature）
-  - `Predicted Chords`: marker イベントに Harte 表記のコード名（例: `A:min7`, `C:maj7/5`）。このトラックに無ければ、他のトラック（テンポマップなど）の marker を使う
-  - `melody`: 歌メロトラック（`--melody amt` 指定時に使用）
-- **歌詞テキスト**: UTF-8 プレーンテキスト
-  - 1行 = ChordPro の1行、空行 = セクション区切り
-  - ルビ記法: `漢字(かな)` で読みを指定可能（出力にも反映）
-  - 合いの手・コーラス: `（…）` や `(…)` は発声順にアライメント
+---
 
-## インストール
+## クイックスタート
 
-パッケージマネージャに [uv](https://docs.astral.sh/uv/) を使用します。Python 3.10〜3.13、CUDA 対応 GPU を推奨（CPU 実行も可能）。
-
-```bash
-uv sync
-```
-
-※ Windows / Linux 環境では CUDA 12.6 版 PyTorch が導入されます。
-
-### SheetSage2 モデル（歌メロ採譜）
-
-歌メロの抽出には [SheetSage2](https://huggingface.co/m-a-p/SheetSage2) を使用します（初回実行時に約 230MB 自動取得）。  
-※ モデル重みライセンス: **CC BY-NC 4.0（非商用）**  
-ローカルモデルを使う場合は `--melody amt`（MIDI トラックを利用）または `--sheetsage-model <DIR>` を指定してください。
-
-## 使い方
-
-### Google Colab
+### 1. Google Colab（手軽に試す）
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anime-song/audio2chordpro/blob/main/notebooks/audio2chordpro_colab.ipynb)
 
-GPU ランタイムを選び、セルを1つ実行して出てくる「audio2chordpro を開く」から、下の UI を使えます（初回はインストールに数分）。
-プロジェクトは Google ドライブ（`MyDrive/audio2chordpro`）に保存でき、次回も続きから使えます。
+GPU ランタイムを選択し、ノートブックのセルを実行するだけで Web UI が起動します。生成したプロジェクトは Google ドライブに保存できます。
 
-### CLI
+### 2. ローカル Web UI
+
+パッケージマネージャ [uv](https://docs.astral.sh/uv/) を使用します（Python 3.10〜3.13、CUDA 対応 GPU 推奨・CPU でも実行可能）。
+
+```bash
+# 依存関係のインストール
+uv sync
+
+# サーバ起動（ブラウザで http://127.0.0.1:8000 が開きます）
+uv run audio2chordpro serve
+```
+
+※ Web UI の画面は GitHub Releases からビルド済みアセットが自動取得されるため、Node.js のインストールは不要です。
+
+#### 画面での基本的な流れ
+1. **音源の追加**: MP3 / WAV ファイルをアップロード（解析ジョブがバックグラウンドで開始）
+2. **曲情報・歌詞の指定**: 音源タグから自動取得、または [うたてん](https://utaten.com/) から検索して設定（直接入力も可能）
+3. **作成・プレビュー**: アライメントと ChordPro の生成
+4. **調整・出力**: プレビュー確認、書式変更（コード名 / ディグリー）、手動修正、ファイルのダウンロード
+
+### 3. コマンドライン（CLI）
 
 ```bash
 # 基本実行（音源 + MIDI + 歌詞 → ChordPro）
 uv run audio2chordpro song.mp3 --midi song.mid --lyrics lyrics.txt -o song.cho \
-    --title 曲名 --artist 歌手 --lyricist 作詞者 --composer 作曲者 --arranger 編曲者
+    --title 曲名 --artist 歌手 --lyricist 作詞者 --composer 作曲者
 
-# アライメント結果を保存・再利用（再レンダリングの高速化）
-uv run audio2chordpro song.mp3 --midi song.mid --lyrics lyrics.txt -o song.cho --save-alignment song.align.json
-uv run audio2chordpro song.mp3 --midi song.mid --alignment song.align.json -o song.cho
+# MIDI なし（tsumugi で音源から自動生成）
+uv run audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho --save-midi song.mid
 
-# 歌詞なし（コード譜のみ出力）
+# 歌詞なし（コード譜・小節グリッドのみ出力）
 uv run audio2chordpro song.mp3 --midi song.mid -o chords.cho
 
-# MIDI なし（tsumugi で音源から作る。作った MIDI は --save-midi で保存できる）
-uv run audio2chordpro song.mp3 --lyrics lyrics.txt -o song.cho --save-midi song.mid
+# アライメント結果を保存・再利用（再レンダリングを高速化）
+uv run audio2chordpro song.mp3 --midi song.mid --lyrics lyrics.txt -o song.cho --save-alignment song.align.json
+uv run audio2chordpro song.mp3 --midi song.mid --alignment song.align.json -o song.cho
 ```
 
-中間処理結果（tsumugi の MIDI、ボーカル分離、CTC、SheetSage2 出力）は `./cache`（`--cache-dir` で変更可）にキャッシュされます。
-
-#### tsumugi（MIDI の自動生成）
-
-`--midi` を省略すると [tsumugi](https://github.com/anime-song/tsumugi) で、ステム分離 → ステムごとの採譜 → ビート・コード・調の推定を行い、
-その MIDI（`<曲名>_beat_chord.mid`）を使います。
-
-#### 主なオプション
+#### 主な CLI オプション
 
 | オプション | デフォルト | 説明 |
 |---|---|---|
-| `--melody` | `sheetsage` | 歌メロ取得元: `sheetsage` / `amt`（MIDI の melody トラック） |
-| `--beats` | `amt` | 拍取得元: `amt`（MIDI テンポマップ）/ `sheetsage`（変拍子対応） |
-| `--simplify` | `false` | 異名同音の簡略表記（E#, B#, Cb, Fb → F, C, B, E） |
-| `--degree` | `false` | コードをディグリー（例: VIm7、IV/V）で書く。[chord-romanizer](https://github.com/anime-song/chord-romanizer) で前後の流れから決め、主音は MIDI の調（転調も） |
+| `--midi` | – | 入力 MIDI（省略時は [tsumugi](https://github.com/anime-song/tsumugi) で自動生成） |
+| `--melody` | `sheetsage` | 歌メロ取得元: `sheetsage`（SheetSage2 による採譜） / `amt`（MIDI の melody トラック） |
+| `--beats` | `amt` | 拍取得元: `amt`（MIDI テンポマップ） / `sheetsage`（変拍子対応） |
+| `--degree` | `false` | コードをディグリー表記（`VIm7`, `IV/V` 等）で出力（chord-romanizer） |
+| `--simplify` | `false` | 異名同音の簡略化（E#, B#, Cb, Fb → F, C, B, E） |
 | `--head-outside` | `false` | 行頭コードを括弧の外側に配置（デフォルトは `（[C]はい）`） |
-| `--no-tail-grid` | `false` | 行末以降・行中のコード小節グリッド展開を無効化 |
-| `--save-midi` | – | tsumugi で作った MIDI をコピーする先 |
-| `--models-dir` | `--cache-dir` | tsumugi のソース・チェックポイントの置き場（曲ごとに `--cache-dir` を分けても共有できる） |
+| `--no-tail-grid` | `false` | 行末・行中のコード小節グリッド展開を無効化 |
+| `--save-midi` | – | tsumugi で自動生成した MIDI の保存先 |
+| `--cache-dir` | `./cache` | 中間キャッシュの保存先 |
 
-### Python API
+---
+
+## 処理の仕組み
+
+```
+音源 ──────┬─ ボーカル分離（Demucs）─ CTC（wav2vec2）─┐
+           │                                             ├─ 強制アライメント ─ モーラごとの発声時刻
+歌詞 ──────┴─ 形態素・モーラ解析（pyopenjtalk） ────────┘        ↑
+                                                                 │（歌メロ開始時刻を事前分布として反映）
+AMT MIDI ── 拍タイムライン（テンポ正規化・コード表記） ──────────┤
+SheetSage2 ─ 歌メロノート ──────────────────────────────────────┘
+                                         ↓
+            モーラとメロディの DP 対応付け → 8分音符グリッド量子化 → コード配置 → ChordPro 出力
+```
+
+1. **拍タイムライン (`timeline.py`)**: MIDI テンポマップを拍単位に正規化。冒頭の異常テンポや変拍子、位相ズレを補正。コードの綴りは MIDI 本来の表記を保持。
+2. **歌詞・モーラ解析 (`lyrics.py`)**: 形態素解析と読み（モーラ）への分解。英単語辞書、数字の読み分け、コード挿入用の漢字分割に対応。
+3. **強制アライメント (`align.py`, `vocals.py`)**: ボーカル音声を分離し、CTC モデルで音響特徴量を抽出。歌メロの発音開始時刻を事前分布として加味し、モーラ単位の発声時刻を特定。
+4. **コード配置・整形 (`render.py`)**: 発声タイミングと歌メロノートを対応付け、8分音符グリッドに量子化。各コード変化点に最も近い音節へ配置し、間奏の小節グリッドやルビ補正を行って出力。
+
+---
+
+## プロジェクト管理とキャッシュ
+
+Web UI および Python API では、楽曲ごとに 1 つのプロジェクトフォルダを作成して状態を管理します。
+
+```
+projects/<曲名>/
+  project.json         設定・実行ステータス・入力のハッシュ値
+  song.json            楽曲メタデータ（曲名、アーティスト、クレジット情報）
+  audio/<ファイル名>   元の音源
+  lyrics.txt           使用歌詞
+  midi/amt.mid         使用した MIDI ファイル
+  edits/chords.json    手動修正したコード情報
+  alignment.auto.json  自動推定されたアライメント
+  alignment.json       手動修正したアライメント（存在する場合に優先）
+  output/<曲名>.cho    生成された ChordPro ファイル
+  work/                軽量な作業データ（SheetSage2 出力など）
+```
+
+- **容量の節約**: プロジェクトフォルダ内には軽量なファイル（数 MB）のみを保存します。
+- **一時ファイル（scratch）**: ボーカル分離音声や CTC 特徴量などの大きな中間ファイル（1曲あたり約 200MB）は、`~/.cache/audio2chordpro/scratch/` に音源ハッシュ別で隔離保存され、アライメントの再実行時のみ利用されます。
+
+---
+
+## Python API
 
 ```python
 from audio2chordpro import Options, SongInfo, transcribe
@@ -120,163 +149,75 @@ result = transcribe(
     options=Options(cache_dir="cache"),
 )
 
-# ChordPro 文字列の取得
 print(result.chordpro)
-
-# アライメントデータ（JSONシリアライズ可能）
-alignment_dict = result.alignment.to_dict()
 ```
 
-アライメント修正後の再レンダリングには `prepare()` と `render_chordpro()` を使用します。
-手で直したコードは `prepare(..., chords=[(秒, コード名), ...])` で MIDI のコードの代わりに使えます。
-
-### プロジェクト（段階ごとに実行・途中からやり直し）
-
-1曲を1つのフォルダにまとめ、段階ごとの結果を保存します。歌詞や設定を変えたときは、影響する段階だけをやり直します（UI からの利用を想定）。
-重い解析（tsumugi・SheetSage2・ボーカル分離）は音源だけで進むので、歌詞を選ぶ前に始めておけます。
+### プロジェクト単位の操作
 
 ```python
 from audio2chordpro import Project
 
-p = Project.create("projects", "歌手 - 曲名.mp3")  # タグ（曲名・歌手・作詞・作曲・歌詞）、無ければファイル名から曲情報を入れる
-p.run("analysis")                                  # tsumugi → SheetSage2 → ボーカル分離・CTC
-hits = p.search_lyrics()                           # 曲情報で歌詞サイトを検索
-p.use_lyrics(hits[0])                              # 歌詞を使い、空いている曲情報も埋める
-p.run()                                            # アライメント → ChordPro（まだの段階・古くなった段階だけ）
+p = Project.create("projects", "歌手 - 曲名.mp3")
+p.run("analysis")          # 音響解析（tsumugi / SheetSage2 / ボーカル分離）
+hits = p.search_lyrics()    # 歌詞サイトの検索
+p.use_lyrics(hits[0])       # 歌詞とメタデータを適用
+p.run()                     # アライメントと ChordPro 生成
+
+# 書式変更時はレンダリングのみ再実行
+p.set_options(notation="degree")
+p.run()
 print(p.chordpro())
-
-p.set_options(simplify=True)                       # 書式を変えたら ChordPro だけやり直す
-p.status()                                         # {"midi": "done", "melody": "done", "vocals": "done", "align": "done", "render": "stale"}
 ```
 
-手元の MIDI を使うときは `p.set_midi("song.mid")`、歌詞を直接入れるときは `p.set_lyrics(text)` を使います。
-コードの手直しは `p.save_chords([(秒, コード名), ...])`（元は `p.midi_chords()`、MIDI への書き出しは `p.export_midi()`）、
-アライメントの手直しは `p.save_alignment(alignment)` で保存します。手直ししたアライメントは、そのあと歌詞を変えると使われなくなります。
+---
 
-```
-projects/<曲名>/
-  project.json         設定・各段階を実行したときの入力の指紋・手直しの記録
-  song.json            曲情報と各項目の出所（tag / filename / site:<サイト> / manual）
-  audio/<元のファイル名>
-  lyrics.txt           使う歌詞（lyrics.source.json に出所）
-  midi/amt.mid         AMT の MIDI（書き換えない）
-  edits/chords.json    手で直したコード
-  alignment.auto.json  自動のアライメント（手で直したものは alignment.json）
-  output/<曲名>.cho
-  work/                SheetSage2 の出力（1〜2 MB）
-```
+## 開発・Web UI のカスタマイズ
 
-プロジェクトには小さいファイルだけを置きます（音源を除いて 1 曲数 MB）。
-大きい中間ファイルのうち、ボーカル分離・CTC（1曲 200 MB ほど）は `~/.cache/audio2chordpro/scratch/<音源のハッシュ>/`（`scratch_dir=...`、`serve --scratch-dir` で変更可）に置き、
-アライメントをやり直すときにだけ使います（消えていればそのとき作り直します）。tsumugi のステム（1曲 250 MB ほど）は MIDI を取り出したら消します。
-tsumugi のソース・チェックポイントは全曲で共有する `~/.cache/audio2chordpro`（`models_dir=...`）に置きます。
-
-### UI（ブラウザの画面）
+ローカルでフロントエンド（`web/`）を編集・ビルドする場合:
 
 ```bash
-uv run audio2chordpro serve     # http://127.0.0.1:8000 が開く（プロジェクトは ./projects。--root で変更）
+# サーバを起動（ブラウザ自動起動オフ）
+uv run audio2chordpro serve --no-browser
+
+# フロントエンド開発サーバの起動（http://localhost:5173、/api はバックエンドへプロキシ）
+cd web
+npm install
+npm run dev
+
+# 本番用ビルド（audio2chordpro/server/static に出力）
+npm run build
+
+# OpenAPI スキーマから TypeScript 型を再生成
+npm run gen:api
 ```
 
-画面（`web/` のビルド）は、無ければ GitHub の Release「web-latest」からビルド済みのものを自動で取ってきます（Node.js は要りません）。
-Release の画面は、main の `web/` が変わるたびに GitHub Actions（`.github/workflows/web.yml`）がビルドして置きます。
-手元の `web/` を使うときは `cd web && npm install && npm run build`（`audio2chordpro/server/static` に書き出す）。
-
-手順は ① 音源を入れる → ② 曲情報・歌詞 → ③ 作成 → ④ コード譜（プレビュー・書式・ダウンロード）です。
-音源を入れると解析（tsumugi・SheetSage2・ボーカル分離）がすぐ裏で始まり、その間に曲情報を確かめ、歌詞を歌詞サイトから選ぶか貼り付けられます。
-重い段階は1本の列（ジョブ）で順に実行し、画面に実行中の段階とログが出ます。
-
-画面を作り変えるときは、`uv run audio2chordpro serve --no-browser` を動かしたまま `cd web && npm run dev`（http://localhost:5173、`/api` はサーバへ中継）。
-API を変えたら `npm run gen:api` で画面側の型（`web/src/api/schema.ts`）を作り直します。
-
-画面は FastAPI の API（`audio2chordpro/server/app.py`、説明は `/docs`）を使っています。中身は上のプロジェクトです。
-画面に含まれるライブラリ（React など、すべて MIT）のライセンス文は、ビルド時に `THIRD_PARTY_NOTICES.txt` にまとめ、画面の下のリンクから見られます。
-
-| API | 内容 |
-|---|---|
-| `GET/POST /api/projects` | プロジェクトの一覧・音源のアップロード（`analyze` で解析も始める） |
-| `GET/DELETE /api/projects/{id}` | プロジェクト（曲情報・歌詞・設定・各段階の状態・ジョブ） |
-| `PATCH /api/projects/{id}/info`・`/options` | 曲情報・設定を変える |
-| `PUT /api/projects/{id}/lyrics`、`GET …/lyrics/search`、`POST …/lyrics/use` | 歌詞を入れる・歌詞サイトで検索して使う |
-| `POST /api/projects/{id}/run` | 段階を実行する（ジョブ）。`GET/DELETE /api/jobs/{id}` で状態・取り消し |
-| `GET …/chordpro`・`…/audio`・`…/midi`、`PUT …/midi` | ChordPro・音源・MIDI の取得、手元の MIDI を使う |
-
-### 歌詞サイトから歌詞を取得
-
-曲名で歌詞サイトを検索し、候補から選んだ曲の歌詞とメタデータ（歌手・作詞・作曲・編曲）を取得できます。
-対応サイトは [うたてん](https://utaten.com/) です。歌ネット・歌time はボット対策（Cloudflare）でプログラムからの取得を受け付けないため対応していません。
-取得した歌詞は各サイトの利用規約に従い、個人的な利用の範囲で使ってください（リクエストは1秒以上の間隔をあけます）。
-
-```python
-from audio2chordpro import transcribe
-from audio2chordpro.providers.lyrics import fetch, search
-
-hits = search("曲名", artist="歌手名")  # 候補（SongHit: 曲名・歌手・作詞・作曲・編曲・歌い出し・URL）
-page = fetch(hits[0])  # LyricsPage: info（SongInfo）・lyrics・lyrics_ruby（ふりがな付き）
-result = transcribe("song.mp3", "song.mid", page.lyrics, page.info)
-```
-
-```bash
-uv run python -m audio2chordpro.providers.lyrics 曲名 --artist 歌手名           # 候補の一覧
-uv run python -m audio2chordpro.providers.lyrics 曲名 --pick 1 -o lyrics.txt   # 1番目の歌詞を保存
-```
-
-## 出力仕様
-
-- **コード配置**: 該当コードへ遷移する音節の直前に配置。シンコペーション（8分音符の食い込み）時は食い込んだ音節の直前に配置。
-- **語中でのコード変化**: 漢字の読みの途中にコードが入る場合、語全体をルビ表記化してコードを埋め込み（例: `言葉(こと[G]ば)`）。
-- **間奏・イントロ**: 2小節以上の歌唱なし区間は小節グリッド形式で出力（例: `[C]---- ----|[F]---- [G]----|`、`-` は8分音符）。変拍子小節には拍子記号（例: `(3/4)`）を付与。
-- **行末の余白**: 最終音節以降にコードが続く場合は小節グリッドを展開。同一小節内のコードはダッシュで補完（例: `…ひかり-[G]- ----|`）。続くグリッドが短ければ（行末と合わせて2小節まで）同じ行に続けて書く（例: `…ひかり-[G]- ----|[Am]---- ----|`）。
-- **行中の余白**: 行の途中でも、音節と次の音節の間にコードが2つ以上続く・1.5小節以上空く場合はダッシュと小節線で埋める（例: `…ひかり--[F]- [G]---|---- [C]---あさ…`）。丸ごと空く小節はグリッドの行にして改行。
-- **歌の終わりがグリッドの頭と重なるとき**: 最後の音節が小節の頭にあり、その後ろに長く歌わない区間が続く場合は、グリッドをその小節の頭から書き、音節のコードは括弧付きの参考表記にする（例: `…ひか[(C)]り` の次の行に `[C]---- [F]----|…`）。
-- **転調**: セクション途中での `{key:…}` 挿入に対応。
-
-## アライメント精度と特性
-
-J-POP / アニソン 8曲（手動作成 ChordPro との比較、コード配置の一致率 F値）:
-- **完全一致**: 約 76%
-- **許容範囲内（±1モーラ）**: 約 89%
-
-### 精度への寄与度
-歌メロ事前分布（約 +12pt） > 8分音符グリッド整音 > SheetSage2 ノート > DP 最適化
-
-### 制限事項
-- 複数人のユニゾンやハーモニーが密接に重なる区間
-- 超高速な歌唱・ラップ調の早口フレーズ
-- 英語歌詞の連続（日本語用発音辞書との差異）
-- 小節途中で倍テンポ等に切り替わる極端な AMT テンポマップ
-
-## 拡張インターフェース
-
-- **MIDI プロバイダ (`providers.MidiProvider`)**: 音源から AMT MIDI を自動生成する。[tsumugi](https://github.com/anime-song/tsumugi) による実装が `providers.midi.TsumugiMidiProvider`
-- **歌詞プロバイダ (`providers.LyricsProvider`)**: 楽曲メタデータからの歌詞自動取得。歌詞サイトによる実装が `providers.lyrics.SiteLyricsProvider`。サイトを増やすときは `providers/lyrics/` に `LyricsSite` のサブクラス（`search_url` / `parse_search` / `parse_song`）を足して `SITES` に登録する
-- **UI / 手動補正**: `Project` の段階・状態（`run` / `status`）と手直しの保存（`save_chords` / `save_alignment`）。`Alignment` は JSON（`to_dict` / `from_dict`）でやり取りできる
+---
 
 ## モジュール構成
 
 | モジュール | 役割 |
 |---|---|
-| `audio2chordpro/pipeline.py` | 統合パイプライン制御（`transcribe`, `prepare`, `align_audio`, `render_chordpro`） |
-| `audio2chordpro/project.py` | 1曲1フォルダのプロジェクト：段階ごとの保存・やり直し・手直し |
-| `audio2chordpro/server/` | UI のサーバ：API（`app.py`）、段階を1本の列で順に実行するジョブ（`jobs.py`） |
-| `web/` | UI の画面（React + TypeScript + Vite）。`src/api/` が API の型と呼び出し、`src/steps/` が手順ごとの画面 |
-| `audio2chordpro/timeline.py` | MIDI テンポマップの拍単位正規化・補正 |
-| `audio2chordpro/chords.py` | コードネームおよび調の解析（綴りは MIDI のまま） |
-| `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表層文字列との対応付け |
-| `audio2chordpro/vocals.py` | 音源からのボーカル分離、CTC 音響特徴量算出 |
+| `audio2chordpro/pipeline.py` | パイプライン統括（`transcribe`, `prepare`, `render_chordpro`） |
+| `audio2chordpro/project.py` | プロジェクト管理（差分実行、入出力の永続化、手動編集反映） |
+| `audio2chordpro/server/` | Web API（FastAPI）およびジョブ実行キュー |
+| `web/` | Web UI（React + TypeScript + Vite） |
+| `audio2chordpro/timeline.py` | MIDI テンポマップの正規化、コード・拍タイムラインの構築、ディグリー変換 |
+| `audio2chordpro/chords.py` | コードネームおよび調の解析 |
+| `audio2chordpro/lyrics.py` | 歌詞トークナイズ、読み・モーラ分解、表記対応付け |
+| `audio2chordpro/vocals.py` | ボーカル分離、CTC 音響特徴量算出 |
 | `audio2chordpro/align.py` | 歌メロ事前分布に基づくラティス強制アライメント |
-| `audio2chordpro/melody.py` | 歌メロノート抽出（MIDI / SheetSage2 ラッパー） |
-| `audio2chordpro/render.py` | モーラ・ノート対応付け、音節グリッド配置、ChordPro 文字列生成 |
-| `audio2chordpro/song_info.py` | 楽曲メタデータ（音源のタグ・ファイル名から読む）とディレクティブ生成 |
-| `audio2chordpro/providers/base.py` | MIDI / 歌詞供給インターフェース定義 |
-| `audio2chordpro/providers/midi/` | 音源からの MIDI 生成（`tsumugi.py`） |
-| `audio2chordpro/providers/lyrics/` | 歌詞サイトの検索・取得（`base.py` 共通部分、`utaten.py` うたてん） |
-| `tests/` | パーサ・タグ読み・コードの手直し・プロジェクト・API のテスト（`uv run pytest`、ネットにはつながず重い処理は走らせない）。画面のテストは `cd web && npm test` |
+| `audio2chordpro/melody.py` | 歌メロノート抽出（SheetSage2 / MIDI） |
+| `audio2chordpro/render.py` | モーラ・ノート対応付け、グリッド配置、ChordPro 文字列生成 |
+| `audio2chordpro/song_info.py` | 音源タグ・ファイル名からのメタデータ抽出 |
+| `audio2chordpro/providers/` | MIDI 生成プロバイダ（tsumugi）、歌詞検索プロバイダ（うたてん） |
+
+---
 
 ## クレジット・ライセンス
 
 - **漢字読みデータ**: [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) (© EDRDG, CC BY-SA 4.0)
 - **CTC 音響モデル**: [reazon-research/japanese-wav2vec2-base-rs35kh](https://huggingface.co/reazon-research/japanese-wav2vec2-base-rs35kh) (Apache-2.0)
-- **歌メロ採譜モデル**: [SheetSage2](https://huggingface.co/m-a-p/SheetSage2) (CC BY-NC 4.0)
-- **AMT（MIDI の自動生成）**: [tsumugi](https://github.com/anime-song/tsumugi) (MIT)。ステム分離に [stem-splitter](https://pypi.org/project/stem-splitter/)
-- **UI の画面**: [React](https://react.dev/)、[React Router](https://reactrouter.com/)、[TanStack Query](https://tanstack.com/query)、[openapi-fetch](https://openapi-ts.dev/openapi-fetch/)（いずれも MIT。ライセンス文は `THIRD_PARTY_NOTICES.txt`）
-- **要素技術・ライブラリ**: [Demucs](https://github.com/facebookresearch/demucs), [pyopenjtalk-plus](https://github.com/tsukumijima/pyopenjtalk-plus), [alkana](https://github.com/cod-sushi/alkana.py)
+- **歌メロ採譜モデル**: [SheetSage2](https://huggingface.co/m-a-p/SheetSage2) (**CC BY-NC 4.0 非商用**)
+- **AMT（MIDI 自動生成）**: [tsumugi](https://github.com/anime-song/tsumugi) (MIT), [stem-splitter](https://pypi.org/project/stem-splitter/)
+- **要素技術・ライブラリ**: [Demucs](https://github.com/facebookresearch/demucs), [pyopenjtalk-plus](https://github.com/tsukumijima/pyopenjtalk-plus), [alkana](https://github.com/cod-sushi/alkana.py), [chord-romanizer](https://github.com/anime-song/chord-romanizer)
+- **Web UI**: [React](https://react.dev/), [React Router](https://reactrouter.com/), [TanStack Query](https://tanstack.com/query), [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) (MIT、ライセンス表記は `THIRD_PARTY_NOTICES.txt`)
