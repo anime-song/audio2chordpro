@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Options:
-    cache_dir: str | Path = "cache"  # ボーカル分離・CTC・SheetSage2 の結果を置く場所
+    cache_dir: str | Path = "cache"  # tsumugi・ボーカル分離・CTC・SheetSage2 の結果を置く場所
+    models_dir: str | Path | None = None  # tsumugi のソース・チェックポイントの置き場（None = cache_dir）
     melody: str = "sheetsage"  # 歌メロの取得元 "sheetsage" | "amt"（MIDI の melody トラック）
     beats: str = "amt"  # 拍の取得元 "amt"（MIDI のテンポマップ）| "sheetsage"
     sheetsage_model: str | Path = SHEETSAGE_MODEL  # Hugging Face のリポジトリ名かローカルのディレクトリ
@@ -42,7 +43,7 @@ def make_midi(audio: str | Path, options: Options | None = None) -> Path:
     from .providers.midi import TsumugiMidiProvider
 
     opt = options or Options()
-    return TsumugiMidiProvider(opt.cache_dir)(audio)
+    return TsumugiMidiProvider(opt.cache_dir, models_dir=opt.models_dir)(audio)
 
 
 def prepare(audio: str | Path, midi: str | Path | None = None, options: Options | None = None) -> tuple[Timeline, list]:

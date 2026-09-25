@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument(f"--{name}", default="", help=label)
     g = ap.add_argument_group("MIDI（tsumugi）")
     g.add_argument("--save-midi", type=Path, help="tsumugi で作った MIDI をここにコピーする")
+    g.add_argument("--models-dir", type=Path, help="tsumugi のソース・チェックポイントの置き場（既定は --cache-dir）")
     g = ap.add_argument_group("アライメント")
     g.add_argument("--save-alignment", type=Path, help="モーラごとの時刻を JSON で保存する")
     g.add_argument("--alignment", type=Path, help="保存したアライメントを使う（音声処理をしない）")
@@ -68,6 +69,7 @@ def main(argv=None) -> None:
     info = SongInfo(args.title, args.artist, args.lyricist, args.composer, args.arranger)
     opt = Options(
         cache_dir=args.cache_dir,
+        models_dir=args.models_dir,
         melody=args.melody,
         beats=args.beats,
         sheetsage_model=args.sheetsage_model,

@@ -47,10 +47,15 @@ def _patch_stem_splitter() -> None:
 class TsumugiMidiProvider:
     """MidiProvider の実装。結果は cache_dir/tsumugi/out/<曲名>/ に置き、2回目以降は再利用する
 
-    source: tsumugi のソースのフォルダ（省略時は COMMIT を GitHub からダウンロード）"""
+    source    : tsumugi のソースのフォルダ（省略時は COMMIT を GitHub からダウンロード）
+    models_dir: ダウンロードしたソース・チェックポイントの置き場（models_dir/tsumugi/）。
+                曲ごとに cache_dir を分けても共有できる。省略時は cache_dir"""
 
-    def __init__(self, cache_dir: str | Path = "cache", source: str | Path | None = None):
-        self.root = (Path(cache_dir) / "tsumugi").resolve()
+    def __init__(
+        self, cache_dir: str | Path = "cache", source: str | Path | None = None, models_dir: str | Path | None = None
+    ):
+        self.out = (Path(cache_dir) / "tsumugi" / "out").resolve()
+        self.root = (Path(models_dir or cache_dir) / "tsumugi").resolve()
         self.source = Path(source).resolve() if source else None
 
     def ensure_source(self) -> Path:
@@ -76,7 +81,7 @@ class TsumugiMidiProvider:
 
     def output_path(self, audio: str | Path) -> Path:
         stem = Path(audio).stem
-        return self.root / "out" / stem / "merged" / f"{stem}_beat_chord.mid"
+        return self.out / stem / "merged" / f"{stem}_beat_chord.mid"
 
     def __call__(self, audio: str | Path, out_dir: str | Path | None = None) -> Path:
         """音源から MIDI を作り、そのパスを返す（out_dir を指定すればそこにコピーする）"""
@@ -102,7 +107,7 @@ class TsumugiMidiProvider:
             with _chdir(self.root):
                 infer_stem.run_stem_separated_transcription(
                     audio,
-                    output_root=self.root / "out",
+                    output_root=self.out,
                     predict_beat_chord=True,
                     predict_velocity=False,  # コード譜には要らない
                 )
